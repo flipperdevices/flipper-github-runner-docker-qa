@@ -16,7 +16,7 @@ echo "FLIPPER_ID=$FLIPPER_ID" >> /etc/environment
 echo "ST_LINK_ID=$ST_LINK_ID" >> /etc/environment
 
 timestamp=$(date +%Y%m%d_%H%M%S)
-log_file="/opt/toolchain/logs/$FLIPPER_ID${timestamp}_${RUN_LEVEL}.log"
+log_file="/opt/toolchain/logs/${FLIPPER_ID}_${timestamp}_${RUN_LEVEL}.log"
 
 /opt/serial_monitor.py "$FLIPPER_ID" --run-level "$RUN_LEVEL" --output "$log_file" &
 MONITOR_PID=$!
