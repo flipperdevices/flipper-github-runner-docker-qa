@@ -2,6 +2,7 @@
 
 set -euo pipefail;
 
+
 FLIPPER_ID=$2
 ST_LINK_ID=$3
 
@@ -14,14 +15,32 @@ export ST_LINK_ID="$ST_LINK_ID"
 echo "FLIPPER_ID=$FLIPPER_ID" >> /etc/environment
 echo "ST_LINK_ID=$ST_LINK_ID" >> /etc/environment
 
+timestamp=$(date +%Y%m%d_%H%M%S)
+log_file="/opt/toolchain/logs/$FLIPPER_ID${timestamp}_${RUN_LEVEL}.log"
+
+/opt/serial_monitor.py "$FLIPPER_ID" --run-level "$RUN_LEVEL" --output "$log_file" &
+MONITOR_PID=$!
+
+function cleanup() {
+    echo "Cleaning up..."
+    kill $MONITOR_PID 2>/dev/null || true
+    wait $MONITOR_PID 2>/dev/null || true
+}
+
+trap cleanup EXIT
+
 function flash_release_to_flipper() {
-    echo "Flashing flipper using fbt..";
+    echo "Prepare to flash flipper using fbt..";
     cd /opt/flipperzero-firmware
 
     # Flash firmware using fbt
     source scripts/toolchain/fbtenv.sh
+    echo "Formatting ext"
+    python3 scripts/storage.py format_ext -p auto
+    echo "Waiting for flipper"
+    python3 scripts/testops.py -t=180 await_flipper
+    echo "Start flashing the flipper"
     python3 scripts/fwflash.py --interface=auto --serial=$ST_LINK_ID /opt/flipperzero-firmware/firmware.bin
-    python3 scripts/storage.py format_ext
 
     echo "Flashing done!";
     set +e;

@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     protobuf-compiler \
     ccache \
     libusb-1.0-0-dev
+RUN pip3 install pyserial
 
 
 # Set up PATH for ccache
@@ -26,5 +27,6 @@ RUN wget ${UpdateServerURL}/firmware/${FirmwareVersion}/flipper-z-f7-full-${Firm
 COPY entrypoint.sh /opt/
 COPY region_data /
 COPY flipperzero-firmware /opt/flipperzero-firmware
+COPY serial_monitor.py /opt/
 RUN chmod +x /opt/entrypoint.sh
 ENTRYPOINT ["/opt/entrypoint.sh"]

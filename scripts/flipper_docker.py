@@ -43,13 +43,6 @@ class FlipperDocker:
     def _create_toolchain_directory(self) -> None:
         pathlib.Path(self.toolchain_directory).mkdir(parents=True, exist_ok=True)
 
-    def _create_log_directory(self) -> None:
-        """Create log directory for flipper logs"""
-        log_dir = "/var/log/flip_Serial"
-        pathlib.Path(log_dir).mkdir(parents=True, exist_ok=True)
-        # Ensure proper permissions for the docker container to write logs
-        os.chmod(log_dir, 0o777)
-
     def _parse_config(self):
         try:
             config_file_path = "/var/lib/flipper-docker/flipper-docker.cfg"
@@ -156,11 +149,8 @@ class FlipperDocker:
             return
 
         hostname = socket.gethostname().split(".", 1)[0]
-        volumes = {
-            self.toolchain_directory: {'bind': '/opt/toolchain', 'mode': 'rw'},
-            '/root/.cache/ccache': {'bind': '/root/.cache/ccache', 'mode': 'rw'},
-            '/var/log/flip_Serial': {'bind': '/var/log/flip_Serial', 'mode': 'rw'}  # Added log directory mount
-        }
+        volumes = {self.toolchain_directory: {'bind': '/opt/toolchain', 'mode': 'rw'},
+                   '/root/.cache/ccache': {'bind': '/root/.cache/ccache', 'mode': 'rw'}}
 
         device_mappings = []
         for host_device, container_device in self.device_mappings.items():
@@ -180,7 +170,6 @@ class FlipperDocker:
         except Exception as e:
             self.logger.exception("Error reading GitHub configuration.", exc_info=e)
             raise
-
         self.logger.debug(f"FLIPPER_ID: {self.flipper_id}")
         self.logger.debug(f"ST_LINK_ID: {self.st_link_id}")
         environment = {
@@ -188,6 +177,7 @@ class FlipperDocker:
             "APP_ID": github_app_id,
             "APP_PRIVATE_KEY": github_private_key,
             "DEBUG_OUTPUT": True,
+#            "RUNNER_TOKEN": github_access_token,
             "RUNNER_NAME": f"{hostname}-{self.flipper_id}",
             "LABELS": self.github_tag,
             "RUN_LEVEL": self.run_level.name,
@@ -232,7 +222,6 @@ class FlipperDocker:
         self.logger.info("Application started!")
         atexit.register(self.at_exit)
         self._create_toolchain_directory()
-        self._create_log_directory()  # Added log directory creation
         for run_level in self.RunLevel:
             self.logger.debug(f"Running in {run_level.name} mode!")
             self.run_level = run_level
