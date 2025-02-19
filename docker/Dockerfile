@@ -1,4 +1,4 @@
-FROM myoung34/github-runner:2.321.0-ubuntu-jammy
+FROM myoung34/github-runner:2.322.0-ubuntu-jammy
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG FirmwareVersion=1.1.2

@@ -38,9 +38,15 @@ function flash_release_to_flipper() {
     echo "Formatting ext"
     python3 scripts/storage.py format_ext -p auto
     echo "Waiting for flipper"
-    python3 scripts/testops.py -t=180 await_flipper
+            if python3 scripts/testops.py -t=180 await_flipper; then
+              echo "Flipper detected."
+              break
+            else
+              echo "Flipper not detected, proceeding to flashing.."
+            fi
     echo "Start flashing the flipper"
     python3 scripts/fwflash.py --interface=auto --serial=$ST_LINK_ID /opt/flipperzero-firmware/firmware.bin
+
 
     echo "Flashing done!";
     set +e;
