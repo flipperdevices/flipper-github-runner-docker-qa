@@ -10,8 +10,7 @@ import os
 from argparse import ArgumentParser
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,9 @@ class SerialMonitor:
         self.thread = threading.Thread(target=self._monitor)
         self.thread.daemon = True
         self.thread.start()
-        logger.info(f"Started monitoring {self.flipper_id}, logging to {self.output_file}")
+        logger.info(
+            f"Started monitoring {self.flipper_id}, logging to {self.output_file}"
+        )
 
     def stop(self):
         """Stop monitoring."""
@@ -67,12 +68,15 @@ class SerialMonitor:
                         log_line = f"{datetime_str} {line}\n"
 
                         # Write to file
-                        with open(self.output_file, 'a') as f:
+                        with open(self.output_file, "a") as f:
                             f.write(log_line)
 
                         # Print to console if not empty
                         if line.strip():
                             print(log_line.strip())
+                    else:
+                        # Sleep if no data to avoid busy loop
+                        time.sleep(0.1)
 
             except serial.SerialException as e:
                 logger.error(f"Serial connection error for {self.flipper_id}: {e}")
@@ -83,16 +87,17 @@ class SerialMonitor:
 def main():
     parser = ArgumentParser(description="Serial Monitor for Flipper")
     parser.add_argument("flipper_id", help="Flipper device ID")
-    parser.add_argument("--run-level", choices=['REPAIR', 'NORMAL'], default='NORMAL',
-                        help="Run level (default: NORMAL)")
-    parser.add_argument("-o", "--output", required=True,
-                        help="Output log file path")
+    parser.add_argument(
+        "--run-level",
+        choices=["REPAIR", "NORMAL"],
+        default="NORMAL",
+        help="Run level (default: NORMAL)",
+    )
+    parser.add_argument("-o", "--output", required=True, help="Output log file path")
     args = parser.parse_args()
 
     monitor = SerialMonitor(
-        flipper_id=args.flipper_id,
-        output_file=args.output,
-        run_level=args.run_level
+        flipper_id=args.flipper_id, output_file=args.output, run_level=args.run_level
     )
 
     try:
