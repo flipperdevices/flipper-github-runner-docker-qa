@@ -74,9 +74,8 @@ class SerialMonitor:
                         # Print to console if not empty
                         if line.strip():
                             print(log_line.strip())
-                    else:
-                        # Sleep if no data to avoid busy loop
-                        time.sleep(0.1)
+                    time.sleep(0.1)
+
 
             except serial.SerialException as e:
                 logger.error(f"Serial connection error for {self.flipper_id}: {e}")
