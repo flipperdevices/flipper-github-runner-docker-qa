@@ -13,9 +13,9 @@ from pygelf import GelfHttpsHandler
 import os
 
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
 
 class FlipperDocker:
     class RunLevel(Enum):
@@ -79,19 +79,21 @@ class FlipperDocker:
             dockerfile_path = "/var/lib/flipper-docker/"
             image_tag = f"flipper-custom-image:{self.github_tag}"
 
-            self.logger.info(f"Building Docker image with tag '{image_tag}' from '{dockerfile_path}'...")
+            self.logger.info(
+                f"Building Docker image with tag '{image_tag}' from '{dockerfile_path}'..."
+            )
 
             # Build the image
             image, build_logs = self.docker_client.images.build(
                 path=dockerfile_path,
                 tag=image_tag,
-                rm=True  # Remove intermediate containers after a successful build
+                rm=True,  # Remove intermediate containers after a successful build
             )
 
             # Log build output
             for chunk in build_logs:
-                if 'stream' in chunk:
-                    for line in chunk['stream'].splitlines():
+                if "stream" in chunk:
+                    for line in chunk["stream"].splitlines():
                         self.logger.debug(line)
 
             self.image = image
@@ -108,7 +110,7 @@ class FlipperDocker:
             raise
 
     def find_device_by_id_and_get_path(
-            self, device_id: str, device_subsystem: str
+        self, device_id: str, device_subsystem: str
     ) -> str:
         try:
             devices = self.pyudev_context.list_devices(subsystem=device_subsystem)
@@ -149,8 +151,10 @@ class FlipperDocker:
             return
 
         hostname = socket.gethostname().split(".", 1)[0]
-        volumes = {self.toolchain_directory: {'bind': '/opt/toolchain', 'mode': 'rw'},
-                   '/root/.cache/ccache': {'bind': '/root/.cache/ccache', 'mode': 'rw'}}
+        volumes = {
+            self.toolchain_directory: {"bind": "/opt/toolchain", "mode": "rw"},
+            "/root/.cache/ccache": {"bind": "/root/.cache/ccache", "mode": "rw"},
+        }
 
         device_mappings = []
         for host_device, container_device in self.device_mappings.items():
@@ -177,7 +181,7 @@ class FlipperDocker:
             "APP_ID": github_app_id,
             "APP_PRIVATE_KEY": github_private_key,
             "DEBUG_OUTPUT": True,
-#            "RUNNER_TOKEN": github_access_token,
+            #            "RUNNER_TOKEN": github_access_token,
             "RUNNER_NAME": f"{hostname}-{self.flipper_id}",
             "LABELS": self.github_tag,
             "RUN_LEVEL": self.run_level.name,
@@ -185,7 +189,9 @@ class FlipperDocker:
             "EPHEMERAL": "1",
         }
 
-        self.logger.info(f"Creating Docker container '{self.flipper_id}' from image '{self.image.tags[0]}'...")
+        self.logger.info(
+            f"Creating Docker container '{self.flipper_id}' from image '{self.image.tags[0]}'..."
+        )
 
         try:
             self.container = self.docker_client.containers.run(
@@ -203,10 +209,14 @@ class FlipperDocker:
             self.logger.error("Container exited with an error.", exc_info=ce)
             raise
         except docker.errors.APIError as api_err:
-            self.logger.error("Docker API error during container creation.", exc_info=api_err)
+            self.logger.error(
+                "Docker API error during container creation.", exc_info=api_err
+            )
             raise
         except Exception as e:
-            self.logger.exception("Unexpected error during container creation.", exc_info=e)
+            self.logger.exception(
+                "Unexpected error during container creation.", exc_info=e
+            )
             raise
 
     def at_exit(self):
@@ -216,7 +226,9 @@ class FlipperDocker:
                 self.container.stop()
                 self.logger.info("Container stopped due to application exit.")
             except docker.errors.DockerException:
-                self.logger.info("Nothing to stop, container not found or already stopped.")
+                self.logger.info(
+                    "Nothing to stop, container not found or already stopped."
+                )
 
     def run(self):
         self.logger.info("Application started!")
@@ -235,7 +247,7 @@ class FlipperDocker:
             container_exit_code = container_result.get("StatusCode")
             if container_exit_code not in [0, 4]:
                 self.logger.error(f"Container exited with code {container_exit_code}!")
-                self.logger.error(self.container.logs().decode('utf-8'))
+                self.logger.error(self.container.logs().decode("utf-8"))
                 self.container = None
                 break
             self.container = None

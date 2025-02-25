@@ -33,19 +33,29 @@ function flash_release_to_flipper() {
     echo "Prepare to flash flipper using fbt..";
     cd /opt/flipperzero-firmware
 
-    # Flash firmware using fbt
     source scripts/toolchain/fbtenv.sh
-    echo "Formatting ext"
-    python3 scripts/storage.py format_ext -p auto
+
+    FWFLASH_CMD="python3 scripts/fwflash.py --interface=auto --serial=$ST_LINK_ID /opt/flipperzero-firmware/firmware.bin"
+    AWAIT_FLIPPER="python3 scripts/testops.py -t=30 await_flipper"
+    FORMAT_EXT="python3 scripts/storage.py format_ext -p auto"
+
     echo "Waiting for flipper"
-            if python3 scripts/testops.py -t=180 await_flipper; then
-              echo "Flipper detected."
-              break
-            else
-              echo "Flipper not detected, proceeding to flashing.."
-            fi
+    if timeout 35s $AWAIT_FLIPPER; then
+        echo "Flipper detected."
+        echo "Formatting ext"
+        $FORMAT_EXT
+    else
+        echo "Flipper not detected, proceeding to flashing..."
+        $FWFLASH_CMD
+        if timeout 35s $AWAIT_FLIPPER; then
+            echo "Flipper detected after flash."
+            echo "Formatting ext"
+            $FORMAT_EXT
+        fi
+    fi
+
     echo "Start flashing the flipper"
-    python3 scripts/fwflash.py --interface=auto --serial=$ST_LINK_ID /opt/flipperzero-firmware/firmware.bin
+    $FWFLASH_CMD
 
 
     echo "Flashing done!";
