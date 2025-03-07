@@ -22,36 +22,48 @@ echo "Installing Flipper GitHub Runner for:"
 echo "Flipper ID: $FLIPPER_ID"
 echo "ST-Link ID: $ST_LINK_ID"
 
+# Define installation paths
+INSTALL_DIR="/opt/flipper-runners"
+VENV_DIR="${INSTALL_DIR}/venv"
+SCRIPTS_DIR="${INSTALL_DIR}/scripts"
+CONFIG_DIR="/var/lib/flipper-docker"
+WRAPPER_SCRIPT="/usr/local/bin/flipper-docker-wrapper.sh"
+
 # Install system dependencies
 echo "Installing system dependencies..."
 apt-get update
-apt-get install -y docker-ce ccache python3-pip logrotate
+apt-get install -y docker-ce ccache python3-venv python3-dev logrotate
 
-# Install Python dependencies
-echo "Installing Python dependencies..."
-pip3 install pyudev docker pygelf
-
-# Configure Docker logging
-echo "Configuring Docker logging..."
-mkdir -p /etc/docker
-cat > /etc/docker/daemon.json << EOF
-{
-    "log-driver": "journald"
-}
-EOF
-
-# Create required directories and copy files
-echo "Setting up directories and files..."
-mkdir -p /var/lib/flipper-docker
+# Create required directories
+echo "Setting up directories..."
+mkdir -p "${INSTALL_DIR}"
+mkdir -p "${SCRIPTS_DIR}"
+mkdir -p "${CONFIG_DIR}"
 mkdir -p "/opt/${FLIPPER_ID}/logs"
 
-# Copy Docker-related files
-cp docker/* /var/lib/flipper-docker/
+# Set up Python virtual environment
+echo "Setting up Python virtual environment..."
+python3 -m venv ${VENV_DIR}
+${VENV_DIR}/bin/pip install --upgrade pip
+${VENV_DIR}/bin/pip install pyudev docker pygelf
 
-# Copy Python script to system
+# Copy Docker-related files
+echo "Copying Docker files..."
+cp -r docker/* ${CONFIG_DIR}/
+
+# Copy Python scripts
 echo "Installing Python scripts..."
-cp scripts/flipper_docker.py /usr/bin/
-chmod +x /usr/bin/flipper_docker.py
+cp scripts/flipper_docker.py ${SCRIPTS_DIR}/
+chmod +x ${SCRIPTS_DIR}/flipper_docker.py
+
+# Create a wrapper script to activate the virtual environment
+echo "Creating wrapper script..."
+cat > ${WRAPPER_SCRIPT} << EOF
+#!/bin/bash
+source ${VENV_DIR}/bin/activate
+exec python ${SCRIPTS_DIR}/flipper_docker.py "\$@"
+EOF
+chmod +x ${WRAPPER_SCRIPT}
 
 # Create service file
 echo "Creating systemd service..."
@@ -64,11 +76,20 @@ Requires=docker.service
 [Service]
 TimeoutStartSec=0
 Restart=always
-ExecStart=sudo python3 /usr/bin/flipper_docker.py ${FLIPPER_ID} ${ST_LINK_ID} FlipperZeroTest
+ExecStart=${WRAPPER_SCRIPT} ${FLIPPER_ID} ${ST_LINK_ID} FlipperZeroTest
 KillSignal=SIGINT
 
 [Install]
 WantedBy=multi-user.target
+EOF
+
+# Configure Docker logging
+echo "Configuring Docker logging..."
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json << EOF
+{
+    "log-driver": "journald"
+}
 EOF
 
 # Configure log rotation
@@ -93,9 +114,14 @@ systemctl restart docker
 systemctl enable "github-runner-${FLIPPER_ID}"
 
 echo "Installation complete!"
-echo "Please ensure you have placed the following files in /var/lib/flipper-docker/:"
-echo "1. flipper-docker.cfg"
+echo ""
+echo "Please ensure you have placed the following files in ${CONFIG_DIR}:"
+echo "1. flipper-docker.cfg with GitHub credentials"
 echo "2. region_data"
 echo ""
-echo "Then start the service with:"
+echo "Installation directory: ${INSTALL_DIR}"
+echo "Python virtual environment: ${VENV_DIR}"
+echo "Log files: /opt/${FLIPPER_ID}/logs/"
+echo ""
+echo "To start the service, run:"
 echo "systemctl start github-runner-${FLIPPER_ID}"
