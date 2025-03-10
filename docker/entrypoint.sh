@@ -2,43 +2,78 @@
 
 set -euo pipefail;
 
+
+FLIPPER_ID=$2
+ST_LINK_ID=$3
+
+echo "Flipper ID: $FLIPPER_ID"
+echo "ST-Link ID: $ST_LINK_ID"
+
+export FLIPPER_ID="$FLIPPER_ID"
+export ST_LINK_ID="$ST_LINK_ID"
+
+echo "FLIPPER_ID=$FLIPPER_ID" >> /etc/environment
+echo "ST_LINK_ID=$ST_LINK_ID" >> /etc/environment
+
+timestamp=$(date +%Y%m%d_%H%M%S)
+log_file="/opt/toolchain/logs/${FLIPPER_ID}_${timestamp}_${RUN_LEVEL}.log"
+
+/opt/serial_monitor.py "$FLIPPER_ID" --run-level "$RUN_LEVEL" --output "$log_file" &
+MONITOR_PID=$!
+
+function cleanup() {
+    echo "Cleaning up..."
+    kill $MONITOR_PID 2>/dev/null || true
+    wait $MONITOR_PID 2>/dev/null || true
+}
+
+trap cleanup EXIT
+
 function flash_release_to_flipper() {
-    echo "Flashing flipper..";
-    openocd \
-        -f interface/stlink.cfg \
-        -c "transport select hla_swd" \
-        -f target/stm32wbx.cfg \
-        -c "stm32wbx.cpu configure -rtos auto" \
-        -c "reset_config srst_only srst_nogate connect_assert_srst" \
-        -c init \
-        -c "program /opt/flipperzero-firmware/firmware.bin exit 0x8000000" \
-        2>&1;
+    echo "Prepare to flash flipper using fbt..";
+    cd /opt/flipperzero-firmware
+
+    source scripts/toolchain/fbtenv.sh
+
+    FWFLASH_CMD="python3 scripts/fwflash.py --interface=auto --serial=$ST_LINK_ID /opt/flipperzero-firmware/firmware.bin"
+    AWAIT_FLIPPER="python3 scripts/testops.py -t=30 await_flipper"
+    FORMAT_EXT="python3 scripts/storage.py format_ext -p auto"
+
+    echo "Waiting for flipper"
+    if timeout 35s $AWAIT_FLIPPER; then
+        echo "Flipper detected."
+        echo "Formatting ext"
+        $FORMAT_EXT
+    else
+        echo "Flipper not detected, proceeding to flashing..."
+        $FWFLASH_CMD
+        if timeout 35s $AWAIT_FLIPPER; then
+            echo "Flipper detected after flash."
+            echo "Formatting ext"
+            $FORMAT_EXT
+        fi
+    fi
+
+    echo "Start flashing the flipper"
+    $FWFLASH_CMD
+
+
     echo "Flashing done!";
     set +e;
     sleep 1;
-    echo "Resetting flipper..";
-    openocd \
-        -f interface/stlink.cfg \
-        -c "transport select hla_swd" \
-        -f target/stm32wbx.cfg \
-        -c "stm32wbx.cpu configure -rtos auto" \
-        -c "reset_config srst_only srst_nogate connect_assert_srst" \
-        -c init \
-        -c "reset run" \
-        -c "exit"
-        2>&1;
-    echo "Resetting done!";
     set -e;
+    cd /
 }
 
 if [[ "$RUN_LEVEL" == "NORMAL" ]]; then
     echo "Starting runner..";
+    cd /actions-runner
     /entrypoint.sh ./bin/Runner.Listener run --startuptype service;
 elif [[ "$RUN_LEVEL" == "REPAIR" ]]; then
     echo "App running into repair mode, restarting container..";
     flash_release_to_flipper;
     exit 0;
 else
-    echo "Wrong RUN_LEVER, exiting with fail..";
+    echo "Wrong RUN_LEVEL, exiting with fail..";
     exit 2;
 fi
