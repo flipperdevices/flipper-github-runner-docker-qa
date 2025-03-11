@@ -20,11 +20,6 @@ METRICS_DIR="/var/lib/node_exporter/textfile_collector"
 LOG_DIR="/var/log"
 WRAPPER_SCRIPT="/usr/local/bin/flipper-monitor-wrapper.sh"
 
-# Install system dependencies
-echo "Installing system dependencies..."
-apt-get update
-apt-get install -y python3-venv python3-dev docker.io
-
 # Create installation directory
 echo "Creating installation directory..."
 mkdir -p ${INSTALL_DIR}

@@ -199,6 +199,7 @@ class FlipperDocker:
         if usb_path:
             self.devices.append(usb_path)
         if flipper_tty_path:
+            self.device_mappings[flipper_tty_path] = "/dev/ttyACM0"  # Consistently map Flipper to ttyACM0
             self.devices.append(flipper_tty_path)
 
     def create_docker_container(self) -> None:

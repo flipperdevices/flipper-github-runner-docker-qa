@@ -24,7 +24,7 @@ echo "ST-Link ID: $ST_LINK_ID"
 
 # Define installation paths
 INSTALL_DIR="/opt/flipper-runners"
-VENV_DIR="${INSTALL_DIR}/venv"
+VENV_DIR="${INSTALL_DIR}/${FLIPPER_ID}/venv"
 SCRIPTS_DIR="${INSTALL_DIR}/scripts"
 CONFIG_DIR="/var/lib/flipper-docker"
 WRAPPER_SCRIPT="/usr/local/bin/flipper-docker-wrapper.sh"
