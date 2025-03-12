@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - dev
+      - ssecsd/new_runner_monitoring
     tags:
       - '*'
 
@@ -27,6 +28,29 @@ jobs:
           fi
           echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
           echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: 'Get latest Flipper firmware release'
+        id: firmware
+        run: |
+          # Fetch the latest release info from the Flipper Zero firmware repo
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/flipperdevices/flipperzero-firmware/releases/latest)
+          RELEASE_TAG=$(echo $LATEST_RELEASE | jq -r '.tag_name')
+          FIRMWARE_VERSION=${RELEASE_TAG#v}  # Remove 'v' prefix if exists
+          echo "FIRMWARE_VERSION=${FIRMWARE_VERSION}" >> $GITHUB_ENV
+          echo "firmware_version=${FIRMWARE_VERSION}" >> $GITHUB_OUTPUT
+          
+          # Create firmware directory
+          mkdir -p docker/flipperzero-firmware
+          
+          # Download the firmware
+          FIRMWARE_URL="https://update.flipperzero.one/builds/firmware/${FIRMWARE_VERSION}/flipper-z-f7-full-${FIRMWARE_VERSION}.bin"
+          curl -L ${FIRMWARE_URL} -o docker/flipperzero-firmware/firmware.bin
+          
+          # Clone the firmware repository for scripts
+          git clone --branch ${RELEASE_TAG} --depth 1 https://github.com/flipperdevices/flipperzero-firmware.git docker/flipperzero-firmware
+          
+          # Clean up .git directory to reduce size
+          rm -rf docker/flipperzero-firmware/.git
 
       - name: 'Set up Docker Buildx'
         uses: docker/setup-buildx-action@v2
