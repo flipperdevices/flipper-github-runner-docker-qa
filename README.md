@@ -60,7 +60,6 @@ This will:
 2. Set up the necessary directories
 3. Configure the systemd service
 4. Set up logging
-5. Create udev rules for device symlinks
 
 The `--simulate` flag can be used to preview the changes without actually making them.
 
@@ -170,14 +169,6 @@ WantedBy=multi-user.target
 
 ## Device Management
 
-### Automatic Device Detection
-
-The system automatically detects and maps Flipper Zero and ST-Link devices using:
-
-1. **udev Rules**: Created during installation to provide consistent device paths
-2. **pyudev**: Used to programmatically discover devices by serial IDs
-3. **Symlinks**: Device symlinks like `/dev/ttyACM1xx` and `/dev/ttyACM2xx` are created
-
 ### Serial Output Monitoring
 
 The `serial_monitor.py` script captures and logs all serial output from the Flipper Zero device during operation. Features include:
@@ -263,7 +254,6 @@ When a new device is added or after a job completes, the system starts in REPAIR
 1. **Device not found**
    - Check USB connections
    - Verify ST-Link and Flipper IDs
-   - Check udev rules with `udevadm info -a /dev/ttyACM0`
 
 2. **Container fails to start**
    - Check Docker service status: `systemctl status docker`

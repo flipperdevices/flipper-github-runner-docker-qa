@@ -131,63 +131,6 @@ exec python ${SCRIPTS_DIR}/flipper_docker.py \"\$@\"
 write_file "${WRAPPER_SCRIPT}" "${WRAPPER_CONTENT}"
 run_cmd chmod +x ${WRAPPER_SCRIPT}
 
-# Add udev rules creation
-echo "Creating udev rules for devices..."
-
-# Determine the next available numbers for Flipper (1XX) and ST-Link (2XX)
-UDEV_RULES_FILE="/etc/udev/rules.d/99-flipper-devices.rules"
-
-# Create the file if it doesn't exist
-if [ ! -f "$UDEV_RULES_FILE" ] || [ "$SIMULATE" = true ]; then
-    run_cmd touch "$UDEV_RULES_FILE"
-fi
-
-# Function to find the next available number
-find_next_number() {
-    local prefix=$1
-    local existing_numbers=""
-
-    # Check if the file exists before attempting to read from it
-    if [ -f "$UDEV_RULES_FILE" ]; then
-        # Look for the last used number for this prefix in the file
-        # Use grep -o to extract just the matching part, then sed to get just the number
-        existing_numbers=$(grep -o "${prefix}[0-9][0-9][0-9]\\?" "$UDEV_RULES_FILE" 2>/dev/null | sed "s/${prefix}//g" | sort -n)
-    fi
-
-    if [ -z "$existing_numbers" ]; then
-        echo "10" # Start with 10 if no existing entries
-    else
-        local last_number=$(echo "$existing_numbers" | tail -1)
-        echo $((last_number + 10)) # Increment by 10 for spacing
-    fi
-}
-
-# Find next available numbers
-FLIPPER_NUM=$(find_next_number "ttyACM1")
-STLINK_NUM=$(find_next_number "ttyACM2")
-
-# Create formatted numbers
-FLIPPER_LINK="ttyACM1${FLIPPER_NUM}"
-STLINK_LINK="ttyACM2${STLINK_NUM}"
-
-echo "Creating device links: Flipper → ${FLIPPER_LINK}, ST-Link → ${STLINK_LINK}"
-
-# Add rules to the udev rules file
-if [ "$SIMULATE" = true ] || ! grep -q "ATTRS{serial}==\"${FLIPPER_ID}\"" "$UDEV_RULES_FILE" 2>/dev/null; then
-    FLIPPER_RULE="ACTION==\"add\", SUBSYSTEM==\"tty\", SUBSYSTEMS==\"usb\", ATTRS{serial}==\"${FLIPPER_ID}\", SYMLINK+=\"${FLIPPER_LINK}\""
-    append_file "$UDEV_RULES_FILE" "$FLIPPER_RULE"
-fi
-
-if [ "$SIMULATE" = true ] || ! grep -q "ATTRS{serial}==\"${ST_LINK_ID}\"" "$UDEV_RULES_FILE" 2>/dev/null; then
-    STLINK_RULE="ACTION==\"add\", SUBSYSTEM==\"tty\", SUBSYSTEMS==\"usb\", ATTRS{serial}==\"${ST_LINK_ID}\", SYMLINK+=\"${STLINK_LINK}\""
-    append_file "$UDEV_RULES_FILE" "$STLINK_RULE"
-fi
-
-# Reload udev rules
-echo "Reloading udev rules..."
-run_cmd udevadm control --reload-rules
-run_cmd udevadm trigger
-
 # Create service file
 echo "Creating systemd service..."
 SERVICE_CONTENT="[Unit]
@@ -247,7 +190,4 @@ echo "Log files: /opt/${FLIPPER_ID}/logs/"
 echo ""
 echo "To start the service, run:"
 echo "systemctl start github-runner-${FLIPPER_ID}"
-echo ""
-echo "Device symlinks created:"
-echo "- Flipper: /dev/${FLIPPER_LINK}"
-echo "- ST-Link: /dev/${STLINK_LINK}"
+
