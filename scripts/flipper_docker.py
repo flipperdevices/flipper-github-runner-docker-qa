@@ -14,6 +14,7 @@ import os
 from datetime import datetime
 
 
+# Set up structured logging for systemd journal
 class JournalAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         # Add structured fields for systemd journal
@@ -128,6 +129,24 @@ class FlipperDocker:
             dockerfile_path = "/var/lib/flipper-docker/"
             image_tag = f"flipper-custom-image:{self.github_tag}"
 
+            # Check if we already have this container running
+            try:
+                existing = self.docker_client.containers.get(self.flipper_id)
+                self.logger.info(f"Found existing container '{self.flipper_id}' with status '{existing.status}'")
+
+                if existing.status == "running":
+                    self.logger.info("Stopping existing container...")
+                    existing.stop(timeout=10)
+
+                self.logger.info("Removing existing container...")
+                existing.remove(force=True)
+                self.logger.info("Existing container removed successfully")
+            except docker.errors.NotFound:
+                # No existing container found, which is fine
+                pass
+            except Exception as e:
+                self.logger.warning(f"Error handling existing container: {str(e)}")
+
             self.logger.info(
                 f"Building Docker image with tag '{image_tag}' from '{dockerfile_path}'..."
             )
@@ -193,13 +212,63 @@ class FlipperDocker:
         )
 
         if tty_path:
-            self.device_mappings[tty_path] = "/dev/tty_stlink"
-            self.devices.append(tty_path)
+            # Find all symlinks pointing to this device
+            tty_symlinks = self.find_symlinks_to_device(tty_path)
+            tty_device_to_use = tty_symlinks[0] if tty_symlinks else tty_path
+
+            if tty_symlinks:
+                self.logger.debug(f"Found symlinks for {tty_path}: {tty_symlinks}")
+                self.logger.debug(f"Using symlink {tty_device_to_use} for ST-Link device")
+
+            self.device_mappings[tty_device_to_use] = "/dev/tty_stlink"
+            self.devices.append(tty_device_to_use)
+
         if usb_path:
             self.devices.append(usb_path)
+
         if flipper_tty_path:
-            self.device_mappings[flipper_tty_path] = "/dev/ttyACM0"  # Consistently map Flipper to ttyACM0
-            self.devices.append(flipper_tty_path)
+            # Try to find symlinks first
+            flipper_symlinks = self.find_symlinks_to_device(flipper_tty_path)
+            flipper_device_to_use = flipper_symlinks[0] if flipper_symlinks else flipper_tty_path
+
+            # Log what we're using
+            if flipper_symlinks:
+                self.logger.debug(f"Found symlinks for {flipper_tty_path}: {flipper_symlinks}")
+                self.logger.debug(f"Using symlink {flipper_device_to_use} for Flipper device")
+
+            # USE THE SYMLINK PATH, not the original
+            # For some reason, flipper does not detect when using ACM0 or if more than 10 are used.
+            self.device_mappings[flipper_device_to_use] = "/dev/ttyACM3"
+            self.devices.append(flipper_device_to_use)
+
+        self.logger.debug(f"Final devices: {self.devices}")
+        self.logger.debug(f"Device mappings: {self.device_mappings}")
+
+    def find_symlinks_to_device(self, target_path):
+        """Find all symlinks pointing to the given device path"""
+        symlinks = []
+        try:
+            # Resolve to absolute path if it's a relative symlink
+            target_real_path = os.path.realpath(target_path)
+
+            # Common locations for device symlinks
+            device_dirs = ['/dev', '/dev/serial/by-id', '/dev/serial/by-path']
+
+            for dir_path in device_dirs:
+                if not os.path.exists(dir_path):
+                    continue
+
+                for filename in os.listdir(dir_path):
+                    full_path = os.path.join(dir_path, filename)
+                    if os.path.islink(full_path):
+                        # Check if this symlink points to our target
+                        if os.path.realpath(full_path) == target_real_path:
+                            symlinks.append(full_path)
+
+            return symlinks
+        except Exception as e:
+            self.logger.warning(f"Error finding symlinks for {target_path}: {str(e)}")
+            return []
 
     def create_docker_container(self) -> None:
         if not self.image:
