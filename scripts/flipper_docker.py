@@ -237,7 +237,7 @@ class FlipperDocker:
                 self.logger.debug(f"Using symlink {flipper_device_to_use} for Flipper device")
 
             # USE THE SYMLINK PATH, not the original
-            # For some reason flipper doesn't detected if we use ACM0 or AMC more than 10
+            # For some reason, flipper does not detect when using ACM0 or if more than 10 are used.
             self.device_mappings[flipper_device_to_use] = "/dev/ttyACM3"
             self.devices.append(flipper_device_to_use)
 
