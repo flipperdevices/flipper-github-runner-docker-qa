@@ -1,4 +1,4 @@
-FROM myoung34/github-runner:2.322.0-ubuntu-jammy
+FROM myoung34/github-runner:2.323.0-ubuntu-jammy
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG FirmwareVersion=1.1.2
@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y \
     git \
     protobuf-compiler \
     ccache \
-    libusb-1.0-0-dev
+    libusb-1.0-0-dev \
+    usbutils
 RUN pip3 install pyserial
 
 

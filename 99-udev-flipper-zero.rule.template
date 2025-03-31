@@ -1,0 +1,7 @@
+ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", \
+    RUN+="/bin/bash -c 'echo DEVPATH=$env{DEVNAME} > /run/$env{ID_SERIAL_SHORT}.env && \
+    systemctl start github-runner-binder@$env{ID_SERIAL_SHORT}.service'"
+
+ACTION=="remove", SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", \
+    RUN+="/bin/bash -c '\
+    systemctl start github-runner-unbinder@$env{ID_SERIAL_SHORT}.service'"

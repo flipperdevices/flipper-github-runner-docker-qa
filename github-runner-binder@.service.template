@@ -1,0 +1,16 @@
+[Unit]
+Description=Flipper Device Binding Service for %i
+After=dev-tty.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+EnvironmentFile=/run/%i.env
+# The template parameter %i will be the serial number
+# The device path comes from the environment file
+ExecStart=/usr/local/bin/flipper-binder.sh ${DEVPATH} %i
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
