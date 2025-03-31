@@ -10,6 +10,7 @@ import argparse
 import configparser
 from enum import Enum
 from pygelf import GelfHttpsHandler
+import os
 from datetime import datetime
 
 

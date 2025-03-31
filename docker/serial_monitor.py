@@ -59,7 +59,7 @@ class SerialMonitor:
                 self.device_path,
                 230400,
                 timeout=1,
-                exclusive=True  # Ensure exclusive access to the device
+                exclusive=False  # Ensure exclusive access to the device
             )
             # Use TextIOWrapper for more efficient line reading
             self.sio = io.TextIOWrapper(
