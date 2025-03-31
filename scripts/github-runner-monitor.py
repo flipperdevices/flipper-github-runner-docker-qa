@@ -30,6 +30,8 @@ class GithubRunnerMetricsCollector:
         self.last_run = None
         self.metric_file = os.path.join(output_dir, 'github_runners.prom')
         self.lock_file = '/tmp/github_runner_metrics.lock'
+        # To store docker container info from previous run
+        self.previous_docker_containers = {}
 
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
@@ -121,11 +123,12 @@ class GithubRunnerMetricsCollector:
                 if not (container_name.startswith('flip_') or 'github' in container_name.lower()):
                     continue
 
-                flipper_id = container_name
+                # Use container name as the stable runner ID
+                runner_id = container_name
 
                 # Basic container info
                 container_info = {
-                    'id': container.id,
+                    'id': container.id,  # still captured if needed internally
                     'name': container.name,
                     'status': container.status,
                     'started_at': container.attrs.get('State', {}).get('StartedAt', ''),
@@ -154,7 +157,7 @@ class GithubRunnerMetricsCollector:
                     container_info['host'] = hostname
 
                 except Exception as e:
-                    logger.warning(f"Failed to extract metadata from container {flipper_id}: {e}")
+                    logger.warning(f"Failed to extract metadata from container {runner_id}: {e}")
                     container_info['github_tag'] = 'unknown'
                     container_info['host'] = 'unknown'
                     container_info['run_level'] = 'unknown'
@@ -166,7 +169,6 @@ class GithubRunnerMetricsCollector:
 
                         # Extract job name from logs
                         job_name = 'Unknown Job'
-                        job_id = container.short_id
                         workflow_name = 'Unknown Workflow'
 
                         # Simple patterns to check for job information
@@ -192,7 +194,7 @@ class GithubRunnerMetricsCollector:
                                 pass
 
                         container_info['job_name'] = job_name
-                        container_info['job_id'] = job_id
+                        # Removed job_id; using runner_id as the stable identifier.
                         container_info['workflow_name'] = workflow_name
                         container_info['job_start_time'] = job_start_time
 
@@ -206,9 +208,9 @@ class GithubRunnerMetricsCollector:
                                 container_info['run_level'] = 'NORMAL'
 
                     except Exception as e:
-                        logger.warning(f"Failed to extract job info from container {flipper_id}: {e}")
+                        logger.warning(f"Failed to extract job info from container {runner_id}: {e}")
 
-                runner_containers[flipper_id] = container_info
+                runner_containers[runner_id] = container_info
 
             return runner_containers
 
@@ -233,8 +235,11 @@ class GithubRunnerMetricsCollector:
                 for unit in unit_list:
                     unit_name = unit.get('unit', '')
                     if unit_name.startswith('github-runner-'):
-                        flipper_id = unit_name.replace('github-runner-', '')
-                        units[flipper_id] = {
+                        runner_id = unit_name.replace('github-runner-', '')
+                        # Remove trailing ".service" if present to match Docker runner_id
+                        if runner_id.endswith('.service'):
+                            runner_id = runner_id[:-8]
+                        units[runner_id] = {
                             'unit': unit_name,
                             'load': unit.get('load', ''),
                             'active': unit.get('active', ''),
@@ -250,103 +255,110 @@ class GithubRunnerMetricsCollector:
             logger.exception(f"Error querying systemd units: {e}")
             return {}
 
+
     def process_metrics(self, journal_logs, docker_containers, systemd_units):
         """Process all data sources into Prometheus metrics"""
-        # First, group journal logs by runner ID to get the latest state for each runner
-        runners_journal = {}
 
+        # Normalize journal logs runner IDs
+        runners_journal = {}
         for log in journal_logs:
             runner_id = log.get('RUNNER_ID')
+            if runner_id and runner_id.endswith('.service'):
+                runner_id = runner_id[:-8]
             if not runner_id:
                 continue
-
-            # Check if we already have this runner and if this log is newer
-            if runner_id not in runners_journal or log.get('STATE_TIMESTAMP', '') > runners_journal[runner_id].get(
-                    'STATE_TIMESTAMP', ''):
+            # Use the newest log per runner_id
+            if runner_id not in runners_journal or log.get('STATE_TIMESTAMP', '') > runners_journal[runner_id].get('STATE_TIMESTAMP', ''):
                 runners_journal[runner_id] = log
 
-        # Get all runner IDs from all sources
-        all_runner_ids = set(list(runners_journal.keys()) +
-                             list(docker_containers.keys()) +
-                             list(systemd_units.keys()))
+        # Normalize docker container keys
+        normalized_docker_containers = {}
+        for rid, data in docker_containers.items():
+            norm_rid = rid
+            if norm_rid.endswith('.service'):
+                norm_rid = norm_rid[:-8]
+            normalized_docker_containers[norm_rid] = data
 
-        # Generate Prometheus metrics
+        # Normalize systemd unit keys
+        normalized_systemd_units = {}
+        for rid, data in systemd_units.items():
+            norm_rid = rid
+            if norm_rid.endswith('.service'):
+                norm_rid = norm_rid[:-8]
+            normalized_systemd_units[norm_rid] = data
+
+        # Normalize previous docker containers keys
+        normalized_previous_docker_containers = {}
+        for rid, data in self.previous_docker_containers.items():
+            norm_rid = rid
+            if norm_rid.endswith('.service'):
+                norm_rid = norm_rid[:-8]
+            normalized_previous_docker_containers[norm_rid] = data
+
+        # Build union of runner IDs from all sources
+        all_runner_ids = set(
+            list(runners_journal.keys()) +
+            list(normalized_docker_containers.keys()) +
+            list(normalized_systemd_units.keys()) +
+            list(normalized_previous_docker_containers.keys())
+        )
+
         metrics = []
-
-        # Define metric headers
-        metrics.append(
-            "# HELP github_runner_state Current state of Github runners based on journal logs (0=offline, 1=starting, 2=repairing, 3=online, 4=error, 5=flashing)")
+        # (Header definitions remain unchanged)
+        metrics.append("# HELP github_runner_state Current state of Github runners based on journal logs (0=offline, 1=starting, 2=repairing, 3=online, 4=error, 5=flashing)")
         metrics.append("# TYPE github_runner_state gauge")
-
-        metrics.append(
-            "# HELP github_runner_container_status Current status of Github runner Docker containers (0=not_found, 1=created, 2=running, 3=paused, 4=restarting, 5=removing, 6=exited, 7=dead)")
+        metrics.append("# HELP github_runner_container_status Current status of Github runner Docker containers (0=not_found, 1=created, 2=running, 3=paused, 4=restarting, 5=removing, 6=exited, 7=dead)")
         metrics.append("# TYPE github_runner_container_status gauge")
-
-        metrics.append(
-            "# HELP github_runner_run_level Current run level of GitHub runner (0=unknown, 1=repair, 2=normal)")
+        metrics.append("# HELP github_runner_run_level Current run level of GitHub runner (0=unknown, 1=repair, 2=normal)")
         metrics.append("# TYPE github_runner_run_level gauge")
-
-        metrics.append(
-            "# HELP github_runner_service_status Current status of Github runner systemd services (0=inactive, 1=active, 2=activating, 3=deactivating, 4=failed)")
+        metrics.append("# HELP github_runner_service_status Current status of Github runner systemd services (0=inactive, 1=active, 2=activating, 3=deactivating, 4=failed)")
         metrics.append("# TYPE github_runner_service_status gauge")
-
         metrics.append("# HELP github_runner_uptime_seconds Time in seconds the runner has been in its current state")
         metrics.append("# TYPE github_runner_uptime_seconds gauge")
-
         metrics.append("# HELP github_runner_job_info Information about the currently running job (always 1)")
         metrics.append("# TYPE github_runner_job_info gauge")
-
         metrics.append("# HELP github_runner_job_runtime_seconds Time in seconds the current job has been running")
         metrics.append("# TYPE github_runner_job_runtime_seconds gauge")
 
         # Define state mappings
-        journal_state_values = {
-            'offline': 0, 'starting': 1, 'repairing': 2,
-            'online': 3, 'error': 4, 'flashing': 5
-        }
-
-        docker_status_values = {
-            'not_found': 0, 'created': 1, 'running': 2, 'paused': 3,
-            'restarting': 4, 'removing': 5, 'exited': 6, 'dead': 7
-        }
-
+        journal_state_values = {'offline': 0, 'starting': 1, 'repairing': 2, 'online': 3, 'error': 4, 'flashing': 5}
+        docker_status_values = {'not_found': 0, 'created': 1, 'running': 2, 'paused': 3, 'restarting': 4, 'removing': 5, 'exited': 6, 'dead': 7}
         run_level_values = {'unknown': 0, 'REPAIR': 1, 'NORMAL': 2}
-
-        systemd_status_values = {
-            'inactive': 0, 'active': 1, 'activating': 2,
-            'deactivating': 3, 'failed': 4
-        }
+        systemd_status_values = {'inactive': 0, 'active': 1, 'activating': 2, 'deactivating': 3, 'failed': 4}
 
         now = datetime.now()
 
-        # Process each runner's data
         for runner_id in all_runner_ids:
             journal_data = runners_journal.get(runner_id, {})
-            docker_data = docker_containers.get(runner_id, {})
-            systemd_data = systemd_units.get(runner_id, {})
+            if runner_id in normalized_docker_containers:
+                docker_data = normalized_docker_containers[runner_id]
+            elif runner_id in normalized_previous_docker_containers:
+                docker_data = normalized_previous_docker_containers[runner_id].copy()
+                docker_data['status'] = 'not_found'
+            else:
+                docker_data = {}
 
-            # Get basic information from any available source
-            host = journal_data.get('HOST', docker_data.get('host', 'unknown'))
-            tag = journal_data.get('RUNNER_TAG', docker_data.get('github_tag', 'unknown'))
+            systemd_data = normalized_systemd_units.get(runner_id, {})
+
+            # Persist host and tag values:
+            host_journal = journal_data.get('HOST', 'unknown')
+            host_docker = docker_data.get('host', 'unknown')
+            host = host_journal if host_journal != "unknown" else host_docker
+
+            tag_journal = journal_data.get('RUNNER_TAG', 'unknown')
+            tag_docker = docker_data.get('github_tag', 'unknown')
+            tag = tag_journal if tag_journal != "unknown" else tag_docker
+
             unit = journal_data.get('UNIT', systemd_data.get('unit', '')).replace('github-runner-', '')
 
-            # Process run level information
             run_level = docker_data.get('run_level', 'unknown')
             run_level_value = run_level_values.get(run_level, 0)
+            metrics.append(f'github_runner_run_level{{runner_id="{runner_id}",host="{host}",tag="{tag}",run_level="{run_level}"}} {run_level_value}')
 
-            # Add run level metric
-            metrics.append(
-                f'github_runner_run_level{{runner_id="{runner_id}",host="{host}",tag="{tag}",run_level="{run_level}"}} {run_level_value}')
-
-            # Process journal-based state
             if journal_data:
                 state = journal_data.get('RUNNER_STATE', 'unknown')
                 state_value = journal_state_values.get(state, -1)
-
-                metrics.append(
-                    f'github_runner_state{{runner_id="{runner_id}",host="{host}",tag="{tag}",unit="{unit}",state="{state}"}} {state_value}')
-
-                # Calculate uptime based on journal state
+                metrics.append(f'github_runner_state{{runner_id="{runner_id}",host="{host}",tag="{tag}",unit="{unit}",state="{state}"}} {state_value}')
                 try:
                     ts_string = journal_data.get('STATE_TIMESTAMP', '')
                     if ts_string:
@@ -354,23 +366,15 @@ class GithubRunnerMetricsCollector:
                             timestamp = datetime.fromisoformat(ts_string.replace('Z', '+00:00'))
                         else:
                             timestamp = datetime.strptime(ts_string, "%Y-%m-%d %H:%M:%S.%f")
-
                         journal_uptime = (now - timestamp).total_seconds()
-                        metrics.append(
-                            f'github_runner_uptime_seconds{{runner_id="{runner_id}",host="{host}",tag="{tag}",source="journal",state="{state}"}} {journal_uptime}')
+                        metrics.append(f'github_runner_uptime_seconds{{runner_id="{runner_id}",host="{host}",tag="{tag}",source="journal",state="{state}"}} {journal_uptime}')
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Error processing timestamp for {runner_id}: {e}")
 
-            # Process Docker container status
             if docker_data:
                 container_status = docker_data.get('status', 'not_found')
                 status_value = docker_status_values.get(container_status, 0)
-                container_id = docker_data.get("id", "unknown")
-
-                metrics.append(
-                    f'github_runner_container_status{{runner_id="{runner_id}",host="{host}",tag="{tag}",container_id="{container_id}",run_level="{run_level}"}} {status_value}')
-
-                # Calculate container uptime if running
+                metrics.append(f'github_runner_container_status{{runner_id="{runner_id}",host="{host}",tag="{tag}",run_level="{run_level}"}} {status_value}')
                 if container_status == 'running' and 'started_at' in docker_data:
                     try:
                         started_at = docker_data['started_at']
@@ -378,46 +382,28 @@ class GithubRunnerMetricsCollector:
                             started_at = started_at.split('.')[0]
                             if started_at.endswith('Z'):
                                 started_at = started_at[:-1]
-
                             start_time = datetime.fromisoformat(started_at)
                             container_uptime = (now - start_time).total_seconds()
-
-                            metrics.append(
-                                f'github_runner_container_uptime_seconds{{runner_id="{runner_id}",host="{host}",tag="{tag}",run_level="{run_level}"}} {container_uptime}')
+                            metrics.append(f'github_runner_container_uptime_seconds{{runner_id="{runner_id}",host="{host}",tag="{tag}",run_level="{run_level}"}} {container_uptime}')
                     except (ValueError, TypeError) as e:
                         logger.warning(f"Error calculating container uptime for {runner_id}: {e}")
 
-                # Process job information if available
                 if container_status == 'running':
                     job_name = docker_data.get('job_name', f"Unknown Job ({runner_id})")
-                    job_id = docker_data.get('job_id', container_id[:12])
                     workflow_name = docker_data.get('workflow_name', 'Unknown Workflow')
-
-                    # Clean strings for Prometheus
                     job_name = job_name.replace('"', '\\"').replace('\n', ' ').strip()
                     workflow_name = workflow_name.replace('"', '\\"').replace('\n', ' ').strip()
-
-                    # Add job info metric
-                    metrics.append(
-                        f'github_runner_job_info{{runner_id="{runner_id}",host="{host}",tag="{tag}",job_name="{job_name}",job_id="{job_id}",workflow="{workflow_name}",run_level="{run_level}"}} 1')
-
-                    # Calculate job runtime
+                    metrics.append(f'github_runner_job_info{{runner_id="{runner_id}",host="{host}",tag="{tag}",job_name="{job_name}",workflow="{workflow_name}",run_level="{run_level}"}} 1')
                     job_start_time = docker_data.get('job_start_time')
                     if job_start_time:
                         job_runtime = (now - job_start_time).total_seconds()
-                        metrics.append(
-                            f'github_runner_job_runtime_seconds{{runner_id="{runner_id}",host="{host}",tag="{tag}",job_name="{job_name}",job_id="{job_id}",run_level="{run_level}"}} {job_runtime}')
+                        metrics.append(f'github_runner_job_runtime_seconds{{runner_id="{runner_id}",host="{host}",tag="{tag}",job_name="{job_name}",run_level="{run_level}"}} {job_runtime}')
             else:
-                # Container not found
-                metrics.append(
-                    f'github_runner_container_status{{runner_id="{runner_id}",host="{host}",tag="{tag}",container_id="none",run_level="unknown"}} 0')
+                metrics.append(f'github_runner_container_status{{runner_id="{runner_id}",host="{host}",tag="{tag}",run_level="unknown"}} {docker_status_values.get("not_found", 0)}')
 
-            # Process systemd unit status
             if systemd_data:
                 service_status = systemd_data.get('active', 'inactive').lower()
                 service_sub_status = systemd_data.get('sub', '').lower()
-
-                # Determine the status value
                 if service_status == 'active':
                     status_value = systemd_status_values['active']
                 elif service_status == 'activating':
@@ -428,11 +414,11 @@ class GithubRunnerMetricsCollector:
                     status_value = systemd_status_values['failed']
                 else:
                     status_value = systemd_status_values['inactive']
-
-                metrics.append(
-                    f'github_runner_service_status{{runner_id="{runner_id}",host="{host}",tag="{tag}",unit="{unit}",status="{service_status}",substatus="{service_sub_status}",run_level="{run_level}"}} {status_value}')
+                metrics.append(f'github_runner_service_status{{runner_id="{runner_id}",host="{host}",tag="{tag}",unit="{unit}",status="{service_status}",substatus="{service_sub_status}",run_level="{run_level}"}} {status_value}')
 
         return metrics
+
+
 
     def write_metrics(self, metrics):
         """Write metrics to the output file"""
@@ -444,30 +430,32 @@ class GithubRunnerMetricsCollector:
 
             # Atomic move to final location
             os.rename(temp_file, self.metric_file)
-            logger.info(f"Updated metrics file with {len(metrics)} lines")
         except Exception as e:
             logger.exception(f"Error writing metrics: {e}")
 
     def run_once(self):
         """Run collection once"""
-        # Set last_run to now before collecting data
         last_run_before = self.last_run
         self.last_run = datetime.now()
 
         # Collect data from all sources
         journal_logs = self.query_journal()
-        docker_containers = self.query_docker_containers()
+        current_docker_containers = self.query_docker_containers()
         systemd_units = self.query_systemd_units()
 
-        if not journal_logs and not docker_containers and not systemd_units:
+        if not journal_logs and not current_docker_containers and not systemd_units:
             logger.warning("No data found from any source")
             # Reset last_run if we didn't find anything
             self.last_run = last_run_before
             return
 
-        # Process and write metrics
-        metrics = self.process_metrics(journal_logs, docker_containers, systemd_units)
+        # Process and write metrics. The process_metrics function will also consider containers
+        # that existed in the previous run but are now missing.
+        metrics = self.process_metrics(journal_logs, current_docker_containers, systemd_units)
         self.write_metrics(metrics)
+
+        # Update previous docker containers state
+        self.previous_docker_containers.update(current_docker_containers)
 
     def run_daemon(self):
         """Run as daemon, collecting metrics at regular intervals"""
@@ -503,7 +491,7 @@ def main():
     collector = GithubRunnerMetricsCollector(args.output_dir, args.interval)
 
     if not collector.get_lock():
-        sys.exit(1)
+        exit(1)
 
     try:
         if args.once:

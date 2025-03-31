@@ -7,7 +7,7 @@ Requires=docker.service
 Type=simple
 User=root
 Group=root
-ExecStart=/usr/local/bin/github-runner-metrics.py --daemon
+ExecStart=/usr/local/bin/flipper-monitor-wrapper.sh --daemon -i 30
 Restart=always
 RestartSec=30
 
@@ -15,7 +15,7 @@ SupplementaryGroups=systemd-journal
 
 PrivateTmp=yes
 ProtectSystem=full
-ReadWritePaths=/var/lib/node_exporter/textfile_collector /var/log
+ReadWritePaths=/opt/flipper-monitor /var/lib/node_exporter/textfile_collector /var/log
 NoNewPrivileges=true
 
 [Install]

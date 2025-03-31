@@ -119,14 +119,14 @@ run_cmd cp -r docker/* ${CONFIG_DIR}/
 
 # Copy Python scripts
 echo "Installing Python scripts..."
-run_cmd cp scripts/flipper_docker.py ${SCRIPTS_DIR}/
-run_cmd chmod +x ${SCRIPTS_DIR}/flipper_docker.py
+run_cmd cp scripts/flipper-docker-runner.py ${SCRIPTS_DIR}/
+run_cmd chmod +x ${SCRIPTS_DIR}/flipper-docker-runner.py
 
 # Create a wrapper script to activate the virtual environment
 echo "Creating wrapper script..."
 WRAPPER_CONTENT="#!/bin/bash
 source ${VENV_DIR}/bin/activate
-exec python ${SCRIPTS_DIR}/flipper_docker.py \"\$@\"
+exec python ${SCRIPTS_DIR}/flipper-docker-runner \"\$@\"
 "
 write_file "${WRAPPER_SCRIPT}" "${WRAPPER_CONTENT}"
 run_cmd chmod +x ${WRAPPER_SCRIPT}

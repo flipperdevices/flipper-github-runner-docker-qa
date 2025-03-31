@@ -1,0 +1,13 @@
+[Unit]
+Description=Dockerized github runner $FLIPPER_SERIAL
+After=docker.service
+Requires=docker.service
+
+[Service]
+TimeoutStartSec=0
+Restart=always
+ExecStart=/usr/local/bin/flipper-docker-wrapper.sh $FLIPPER_SERIAL $STLINK_SERIAL $GITHUB_RUNNER_TAG
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target
