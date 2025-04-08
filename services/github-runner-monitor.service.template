@@ -7,7 +7,7 @@ Requires=docker.service
 Type=simple
 User=root
 Group=root
-ExecStart=/usr/local/bin/flipper-monitor-wrapper.sh --daemon -i 30
+ExecStart=/usr/local/bin/flipper-monitor-wrapper.sh --daemon -i 10
 Restart=always
 RestartSec=30
 
