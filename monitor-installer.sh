@@ -60,13 +60,9 @@ run_cmd chmod 755 ${METRICS_DIR}
 
 # Set up Python virtual environment
 echo "Setting up Python virtual environment..."
-if [ "$SIMULATE" = false ]; then
-    run_cmd python3 -m venv ${VENV_DIR}
-    run_cmd ${VENV_DIR}/bin/pip install --upgrade pip
-    run_cmd ${VENV_DIR}/bin/pip install pyudev docker pygelf
-else
-    echo "SIMULATE: Setting up Python virtual environment with pyudev, docker, and pygelf"
-fi
+run_cmd python3 -m venv ${VENV_DIR}
+run_cmd ${VENV_DIR}/bin/pip install --upgrade pip
+run_cmd ${VENV_DIR}/bin/pip install pyudev docker pygelf
 
 # Copy the monitoring script
 echo "Installing monitoring script..."
@@ -104,13 +100,8 @@ fi
 
 # Reload systemd and enable service
 echo "Configuring systemd service..."
-if [ "$SIMULATE" = true ]; then
-    echo "SIMULATE: systemctl daemon-reload"
-    echo "SIMULATE: systemctl enable github-runner-monitor.service"
-else
-    run_cmd systemctl daemon-reload
-    run_cmd systemctl enable github-runner-monitor.service
-fi
+run_cmd systemctl daemon-reload
+run_cmd systemctl enable github-runner-monitor.service
 
 echo "Installation complete!"
 echo "The monitoring service is now installed and will start on next boot."

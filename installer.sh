@@ -56,6 +56,7 @@ run_cmd() {
         "$@"
     fi
 }
+
 # Define templates
 LOG_RUNNER_TEMPLATE="rules/flipper-runners.logrotate.template"
 UDEV_TEMPLATE="rules/99-udev-flipper-zero.rules.template"
@@ -94,11 +95,8 @@ run_cmd cp -r services/* "$SERVICES_DIR/"
 if [ ! -f "$UDEV_RULE" ]; then
     echo "Installing udev rule..."
     run_cmd cp "$UDEV_TEMPLATE" "$UDEV_RULE"
-    if [ "$SIMULATE" = true ]; then
-        echo "SIMULATE: udevadm control --reload-rules && udevadm trigger"
-    else
-        udevadm control --reload-rules && udevadm trigger
-    fi
+    run_cmd udevadm control --reload-rules
+    run_cmd udevadm trigger
 else
     echo "Udev rule already exists, skipping installation."
 fi
@@ -108,11 +106,7 @@ if [ ! -f "$BINDER_SERVICE" ]; then
     echo "Installing binder service..."
     run_cmd cp "$BINDER_TEMPLATE" "$BINDER_SERVICE"
     run_cmd cp "$UNBINDER_TEMPLATE" "$UNBINDER_SERVICE"
-    if [ "$SIMULATE" = true ]; then
-        echo "SIMULATE: systemctl daemon-reload"
-    else
-        run_cmd systemctl daemon-reload
-    fi
+    run_cmd systemctl daemon-reload
 else
     echo "Binder service already exists, skipping installation."
 fi
@@ -120,6 +114,7 @@ fi
 # Install the systemd service using the template.
 if [ -f "$SERVICE_TEMPLATE" ]; then
     echo "Installing systemd service for Flipper runner..."
+    # Special handling for the sed command
     if [ "$SIMULATE" = true ]; then
         echo "SIMULATE: sed -e \"s/__FLIPPER_SERIAL__/${FLIPPER_SERIAL}/g\" -e \"s/__STLINK_SERIAL__/${STLINK_SERIAL}/g\" -e \"s/__GITHUB_RUNNER_TAG__/${GITHUB_TAG}/g\" \"$SERVICE_TEMPLATE\" > \"$SERVICE_FILE\""
     else
@@ -132,13 +127,8 @@ fi
 
 # Reload systemd and enable the new service.
 echo "Reloading systemd daemon and enabling the service..."
-if [ "$SIMULATE" = true ]; then
-    echo "SIMULATE: systemctl daemon-reload"
-    echo "SIMULATE: systemctl enable github-runner-flip-${FLIPPER_SERIAL}"
-else
-    run_cmd systemctl daemon-reload
-    run_cmd systemctl enable "github-runner-flip-${FLIPPER_SERIAL}"
-fi
+run_cmd systemctl daemon-reload
+run_cmd systemctl enable "github-runner-flip-${FLIPPER_SERIAL}"
 
 # Install service binaries
 echo "Installing service binaries..."
@@ -148,7 +138,6 @@ run_cmd cp services/flipper-docker-wrapper.sh /usr/local/bin/
 run_cmd chmod +x /usr/local/bin/flipper-*.sh
 
 # Install logrotation configuration
-
 echo "Setting up log rotation..."
 if [ ! -f "/etc/logrotate.d/github-runners" ]; then
     run_cmd cp $LOG_RUNNER_TEMPLATE /etc/logrotate.d/github-runners
