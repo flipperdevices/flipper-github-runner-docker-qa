@@ -1,4 +1,4 @@
-# Dockerized GitHub Runners for Flipper Zero QA Team
+# Flipper Zero GitHub Runner System
 
 This system provides a complete solution for running self-hosted GitHub runners with Flipper Zero devices for automated testing, flashing, and QA tasks. The system includes a runner management service, monitoring capabilities, and handles the device firmware flashing lifecycle.
 
@@ -7,30 +7,36 @@ This system provides a complete solution for running self-hosted GitHub runners 
 The system consists of several components:
 - Docker-based GitHub runner containers
 - Python management scripts
-- Systemd services
+- Systemd services for automatic device detection and binding
 - Monitoring solution with Prometheus integration
 
 ### Flow
 
-1. **Initialization**: The systemd service starts a Python script that locates the specified ST-Link and Flipper devices.
-2. **Repair Mode**: Docker container runs in 'REPAIR' state first, which flashes the latest release firmware to the Flipper device.
-3. **Normal Mode**: After successful firmware flashing, the container restarts in 'NORMAL' state and registers as a GitHub self-hosted runner.
-4. **Job Execution**: The runner picks up jobs with matching tags from GitHub and executes them.
-5. **Monitoring**: A dedicated monitoring service tracks the status of all runners and provides metrics.
+1. **Device Detection**: udev rules detect when Flipper devices are connected and trigger binding services
+2. **Initialization**: The systemd service starts a Python script that locates the specified ST-Link and Flipper devices
+3. **Repair Mode**: Docker container runs in 'REPAIR' state first, which flashes the latest release firmware to the Flipper device
+4. **Normal Mode**: After successful firmware flashing, the container restarts in 'NORMAL' state and registers as a GitHub self-hosted runner
+5. **Job Execution**: The runner picks up jobs with matching tags from GitHub and executes them
+6. **Monitoring**: A dedicated monitoring service tracks the status of all runners and provides metrics
 
 ## Project Structure
 
 ```
-├── docker/
-│   ├── Dockerfile            # Docker image definition
-│   ├── entrypoint.sh         # Container entry point script
-│   ├── serial_monitor.py     # Serial output monitoring script
-│   └── region_data/          # Region-specific data for Flipper firmware
+├── 99-udev-flipper-zero.rule.template   # udev rule template for Flipper device detection
+├── installer.sh                         # Main runner installation script
+├── monitor-installer.sh                 # Monitoring service installation script
 ├── scripts/
-│   ├── flipper_docker.py     # Main runner management script
-│   └── flipper_monitor.py    # Metrics collection script
-├── installer.sh              # Runner installation script
-├── monitor-installer.sh      # Monitoring service installation script
+│   ├── flipper-docker-runner.py         # Main runner management script
+│   └── github-runner-monitor.py         # Metrics collection script
+└── services/
+    ├── flipper-binder.sh                # Device binding script
+    ├── flipper-docker-wrapper.sh        # Docker wrapper script
+    ├── flipper-monitor-wrapper.sh       # Monitor wrapper script
+    ├── flipper-unbinder.sh              # Device unbinding script
+    ├── github-runner-binder@.service.template    # Systemd service template for binding
+    ├── github-runner-flip.service.template       # Systemd service template for runner
+    ├── github-runner-monitor.service.template    # Systemd service template for monitoring
+    └── github-runner-unbinder@.service.template  # Systemd service template for unbinding
 ```
 
 ## Prerequisites
@@ -47,32 +53,39 @@ Before installation, ensure:
 ### Runner Installation
 
 ```bash
-sudo ./installer.sh --flipper-id=FLIPPER_ID --stlink=ST_LINK_ID [--simulate]
+sudo ./installer.sh --flipper=FLIPPER_SERIAL --stlink=STLINK_SERIAL [--github-tag=GITHUB_TAG] [--simulate]
 ```
 
 Example:
 ```bash
-sudo ./installer.sh --flipper-id=flip_Testii --stlink=002F00000000000000000001
+sudo ./installer.sh --flipper=flip_Testii --stlink=002F00000000000000000001 --github-tag=FlipperDeviceTest
 ```
 
 This will:
-1. Install required dependencies
-2. Set up the necessary directories
-3. Configure the systemd service
-4. Set up logging
+1. Create necessary directories in `/opt/flipper-runner/`
+2. Copy scripts and service files to their respective locations
+3. Install udev rules for automatic device detection
+4. Configure systemd services for the specified Flipper and ST-Link devices
+5. Install service binaries to `/usr/local/bin/`
 
 The `--simulate` flag can be used to preview the changes without actually making them.
 
-### Node Exporter metrics installation
+After that you need just to build Docker image
+```bash
+cd /var/lib/flipper-docker/
+docker build -t flipper-custom-image:FlipperZeroTest .
+```
+
+### Monitor Installation
 
 ```bash
 sudo ./monitor-installer.sh
 ```
 
 This will:
-1. Install the monitoring service
-2. Configure Prometheus metrics collection
-3. Set up log rotation
+1. Install the monitoring service at `/opt/flipper-monitor/`
+2. Configure Prometheus metrics collection in `/var/lib/node_exporter/textfile_collector/`
+3. Set up log rotation for `/var/log/github-runner-metrics.log`
 4. Enable the monitoring systemd service
 
 ## Configuration
@@ -104,83 +117,31 @@ Where:
 
 ### Docker Configuration
 
-The system uses a custom Docker image based on `myoung34/github-runner:2.322.0-ubuntu-jammy` with additional tools for Flipper Zero development. The Dockerfile includes:
+You'll need to prepare a Docker image with the necessary tools for Flipper Zero development. The Dockerfile should include:
 
-- Python 3 and required libraries
-- Build tools (gcc, make, etc.)
-- libusb for USB device access
-- ccache for faster builds
-- Preloaded Flipper Zero firmware
+1. Base on GitHub runner image (e.g., `myoung34/github-runner:latest`)
+2. Python 3 and required libraries
+3. Build tools (gcc, make, etc.)
+4. libusb for USB device access
+5. Flipper Zero build toolchain
 
-You can specify a custom firmware version during installation:
-
-```
-# Example in Dockerfile
-ARG FirmwareVersion=1.1.2
-ARG UpdateServerURL=https://update.flipperzero.one/builds
-```
-
-### Systemd Services
-
-For each Flipper + ST-Link pair, a dedicated systemd service is created automatically by the installer:
-
-```ini
-[Unit]
-Description=Dockerized github runner FLIPPER_ID
-After=docker.service
-Requires=docker.service
-
-[Service]
-TimeoutStartSec=0
-Restart=always
-ExecStart=/usr/local/bin/flipper-docker-wrapper.sh FLIPPER_ID ST_LINK_ID FlipperZeroTest
-KillSignal=SIGINT
-
-[Install]
-WantedBy=multi-user.target
-```
-
-The monitoring service is configured as:
-
-```ini
-[Unit]
-Description=GitHub Runner Metrics Collector
-After=docker.service node_exporter.service
-Requires=docker.service
-
-[Service]
-Type=simple
-User=root
-Group=root
-ExecStart=/usr/local/bin/flipper-monitor-wrapper.sh --daemon
-Restart=always
-RestartSec=30
-
-SupplementaryGroups=systemd-journal
-
-PrivateTmp=yes
-ProtectSystem=full
-ReadWritePaths=/opt/flipper-monitor /var/lib/node_exporter/textfile_collector /var/log
-NoNewPrivileges=true
-
-[Install]
-WantedBy=multi-user.target
-```
+Place your Dockerfile and any required assets in a directory that will be copied to `/var/lib/flipper-docker/`.
 
 ## Device Management
 
-### Serial Output Monitoring
+### Automatic Device Detection
 
-The `serial_monitor.py` script captures and logs all serial output from the Flipper Zero device during operation. Features include:
+The system uses udev rules to automatically detect when Flipper devices are connected or disconnected:
 
-- Real-time logging to files
-- Timestamp addition to each log line
-- Automatic reconnection on device disconnect
-- Unicode handling for proper character display
+1. When a Flipper device is connected, the udev rule triggers the binder service
+2. The binder service creates the necessary device mappings in `/dev/flipper/`
+3. When a Flipper device is disconnected, the unbinder service removes these mappings
+
+This allows for hot-plugging Flipper devices without manual intervention.
 
 ## Monitoring
 
-The monitoring system collects metrics about runner state, container status, and job execution. 
+The monitoring system collects metrics about runner state, container status, and job execution.
 
 ### Metrics
 
@@ -195,7 +156,7 @@ The following metrics are available in Prometheus format:
 
 ### Metrics Collection
 
-The `flipper_monitor.py` script collects data from multiple sources:
+The `github-runner-monitor.py` script collects data from multiple sources:
 - **systemd Journal**: For runner state information
 - **Docker API**: For container status and job information
 - **systemd Units**: For service status
@@ -205,15 +166,14 @@ Data is processed and formatted as Prometheus metrics, then written to the Node 
 ### Integrations
 
 The monitoring service outputs metrics to `/var/lib/node_exporter/textfile_collector/`, ready to be picked up by Prometheus Node Exporter.
-Make sure to configure Node Exporter to scrape the metrics directory, that can be done by adding
+Make sure to configure Node Exporter to scrape the metrics directory by adding
 `-v /var/lib/node_exporter/textfile_collector:/textfile_collector:ro \
 --collector.textfile.directory=/textfile_collector` to your docker create script.
 
 ## Logs
 
-- Runner logs: `/opt/<FLIPPER_ID>/logs/`
+- Runner logs: `/opt/flipper-runner/FLIPPER_SERIAL/logs/`
 - Container logs: Accessible via `docker logs` or systemd journal
-- Serial monitor logs: `/opt/<FLIPPER_ID>/logs/<FLIPPER_ID>_<TIMESTAMP>_<RUN_LEVEL>.log`
 - Monitoring logs: `/var/log/github-runner-metrics.log`
 
 Log rotation is configured automatically to prevent excessive disk usage.
@@ -242,9 +202,8 @@ When a new device is added or after a job completes, the system starts in REPAIR
 
 1. The Docker container is created with device mappings for both Flipper and ST-Link
 2. The container's entrypoint script handles:
-   - Serial port monitoring
-   - Firmware flashing using FBT (Flipper Build Tool)
-   - GitHub runner registration and startup
+   - Firmware flashing (in REPAIR mode)
+   - GitHub runner registration and startup (in NORMAL mode)
 3. When a job completes, the container exits with code 0, triggering a restart in REPAIR mode
 
 ## Troubleshooting
@@ -254,6 +213,7 @@ When a new device is added or after a job completes, the system starts in REPAIR
 1. **Device not found**
    - Check USB connections
    - Verify ST-Link and Flipper IDs
+   - Check `/run/` directory for environment files
 
 2. **Container fails to start**
    - Check Docker service status: `systemctl status docker`
@@ -267,17 +227,17 @@ When a new device is added or after a job completes, the system starts in REPAIR
 
 4. **Firmware flashing fails**
    - Verify ST-Link connection and permissions
-   - Check if firmware file exists in the container
-   - Review serial monitor logs for specific errors
+   - Check if the Docker container has access to the device
+   - Review container logs for specific errors
 
 ### Diagnostic Commands
 
 ```bash
 # Check runner service status
-systemctl status github-runner-<FLIPPER_ID>
+systemctl status github-runner-flip-<FLIPPER_SERIAL>
 
 # View runner logs
-journalctl -u github-runner-<FLIPPER_ID> -f
+journalctl -u github-runner-flip-<FLIPPER_SERIAL> -f
 
 # Check monitor service status
 systemctl status github-runner-monitor
@@ -286,31 +246,30 @@ systemctl status github-runner-monitor
 tail -f /var/log/github-runner-metrics.log
 
 # Check Docker container status
-docker ps -a | grep <FLIPPER_ID>
-
-# View serial monitor logs
-ls -la /opt/toolchain/logs/
-cat /opt/toolchain/logs/<FLIPPER_ID>_<TIMESTAMP>_<RUN_LEVEL>.log
+docker ps -a | grep <FLIPPER_SERIAL>
 
 # Check udev rules 
-cat /etc/udev/rules.d/99-flipper-devices.rules
+cat /etc/udev/rules.d/99-udev-flipper-zero.rules
 
 # Verify device symlinks
-ls -la /dev/ttyACM*
-ls -la /dev/serial/by-id/
+ls -la /dev/flipper/
 ```
 
 ### Restarting Services
 
-If you need to restart the entire system:
+If you need to restart:
 
 ```bash
 # Restart a specific runner
-systemctl restart github-runner-<FLIPPER_ID>
+systemctl restart github-runner-flip-<FLIPPER_SERIAL>
 
 # Restart the monitoring service
 systemctl restart github-runner-monitor
 
 # Restart all runner services
-systemctl restart 'github-runner-*'
+systemctl restart 'github-runner-flip-*'
 ```
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
