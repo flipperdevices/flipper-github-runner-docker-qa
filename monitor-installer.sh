@@ -8,101 +8,109 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Add simulation flag support
+SIMULATE=false
+for arg in "$@"; do
+    case $arg in
+        --simulate)
+            SIMULATE=true
+            ;;
+        *)
+            echo "Unknown option: $arg"
+            ;;
+    esac
+done
+
+if [ "$SIMULATE" = true ]; then
+    echo "Running in simulation mode. Commands will be printed instead of executed."
+fi
+
+# A wrapper to either execute or simulate a command
+run_cmd() {
+    if [ "$SIMULATE" = true ]; then
+        echo "SIMULATE: $*"
+    else
+        "$@"
+    fi
+}
+
 echo "===== Flipper GitHub Runner Monitor Installer ====="
 echo "This script will install the monitoring service for Flipper GitHub Runners"
 
 # Define paths
 INSTALL_DIR="/opt/flipper-monitor"
 VENV_DIR="${INSTALL_DIR}/venv"
-MONITOR_SCRIPT="${INSTALL_DIR}/github-runner-metrics.py"
+MONITOR_SCRIPT="${INSTALL_DIR}/github-runner-monitor.py"
 SERVICE_FILE="/etc/systemd/system/github-runner-monitor.service"
 METRICS_DIR="/var/lib/node_exporter/textfile_collector"
 LOG_DIR="/var/log"
 WRAPPER_SCRIPT="/usr/local/bin/flipper-monitor-wrapper.sh"
+LOGROTATE_FILE="/etc/logrotate.d/github-runner-metrics"
+# Define templates
+WRAPPER_TEMPLATE="services/flipper-monitor-wrapper.sh"
+SERVICE_TEMPLATE="services/github-runner-monitor.service.template"
+MONITOR_SCRIPT_FILE="scripts/github-runner-monitor.py"
+LOGROTATE_TEMPLATE="services/github-runner-metrics.logrotate.template"
 
 # Create installation directory
 echo "Creating installation directory..."
-mkdir -p ${INSTALL_DIR}
-mkdir -p ${METRICS_DIR}
-chmod 755 ${METRICS_DIR}
+run_cmd mkdir -p ${INSTALL_DIR}
+run_cmd mkdir -p ${METRICS_DIR}
+run_cmd chmod 755 ${METRICS_DIR}
 
 # Set up Python virtual environment
 echo "Setting up Python virtual environment..."
-python3 -m venv ${VENV_DIR}
-${VENV_DIR}/bin/pip install --upgrade pip
-${VENV_DIR}/bin/pip install pyudev docker pygelf
+if [ "$SIMULATE" = false ]; then
+    run_cmd python3 -m venv ${VENV_DIR}
+    run_cmd ${VENV_DIR}/bin/pip install --upgrade pip
+    run_cmd ${VENV_DIR}/bin/pip install pyudev docker pygelf
+else
+    echo "SIMULATE: Setting up Python virtual environment with pyudev, docker, and pygelf"
+fi
 
 # Copy the monitoring script
 echo "Installing monitoring script..."
-cp scripts/flipper_monitor.py ${MONITOR_SCRIPT}
-chmod +x ${MONITOR_SCRIPT}
+run_cmd cp $MONITOR_SCRIPT_FILE ${MONITOR_SCRIPT}
+run_cmd chmod +x ${MONITOR_SCRIPT}
 
-# Create a wrapper script to activate the virtual environment
-echo "Creating wrapper script..."
-cat > ${WRAPPER_SCRIPT} << EOF
-#!/bin/bash
-source ${VENV_DIR}/bin/activate
-exec python ${MONITOR_SCRIPT} "\$@"
-EOF
-chmod +x ${WRAPPER_SCRIPT}
+# Copy and configure the wrapper script
+echo "Installing wrapper script..."
+if [ -f "${WRAPPER_TEMPLATE}" ]; then
+    run_cmd cp "${WRAPPER_TEMPLATE}" "${WRAPPER_SCRIPT}"
+    run_cmd chmod +x "${WRAPPER_SCRIPT}"
+else
+    echo "Wrapper script template not found at ${WRAPPER_TEMPLATE}!"
+    exit 1
+fi
 
-# Copy the service file
+# Copy and configure the systemd service file
 echo "Installing systemd service..."
-cat > ${SERVICE_FILE} << EOF
-[Unit]
-Description=GitHub Runner Metrics Collector
-After=docker.service node_exporter.service
-Requires=docker.service
+if [ -f "${SERVICE_TEMPLATE}" ]; then
+    run_cmd cp "${SERVICE_TEMPLATE}" "${SERVICE_FILE}"
+else
+    echo "Service template not found at ${SERVICE_TEMPLATE}!"
+    exit 1
+fi
 
-[Service]
-Type=simple
-User=root
-Group=root
-ExecStart=${WRAPPER_SCRIPT} --daemon
-Restart=always
-RestartSec=30
-
-SupplementaryGroups=systemd-journal
-
-PrivateTmp=yes
-ProtectSystem=full
-ReadWritePaths=${INSTALL_DIR} ${METRICS_DIR} ${LOG_DIR}
-NoNewPrivileges=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Set up log rotation for metrics logs
+# Set up log rotation
 echo "Configuring log rotation..."
-cat > "/etc/logrotate.d/github-runner-metrics" << EOF
-/var/log/github-runner-metrics.log {
-    daily
-    rotate 14
-    compress
-    delaycompress
-    missingok
-    notifempty
-    create 0644 root root
-}
-EOF
-
-# Create a basic configuration for node_exporter if it doesn't exist
-if [ ! -f "/etc/node_exporter/config.yml" ]; then
-    mkdir -p /etc/node_exporter
-    cat > "/etc/node_exporter/config.yml" << EOF
-# Node Exporter configuration
-collectors:
-  textfile:
-    directory: "${METRICS_DIR}"
-EOF
-    echo "Created basic node_exporter configuration"
+if [ -f "${LOGROTATE_TEMPLATE}" ]; then
+    run_cmd cp "${LOGROTATE_TEMPLATE}" "${LOGROTATE_FILE}"
+    run_cmd chmod 644 "${LOGROTATE_FILE}"
+else
+    echo "Logrotate template not found at ${LOGROTATE_TEMPLATE}!"
+    exit 1
 fi
 
 # Reload systemd and enable service
 echo "Configuring systemd service..."
-systemctl daemon-reload
-systemctl enable github-runner-monitor.service
+if [ "$SIMULATE" = true ]; then
+    echo "SIMULATE: systemctl daemon-reload"
+    echo "SIMULATE: systemctl enable github-runner-monitor.service"
+else
+    run_cmd systemctl daemon-reload
+    run_cmd systemctl enable github-runner-monitor.service
+fi
 
 echo "Installation complete!"
 echo "The monitoring service is now installed and will start on next boot."

@@ -56,6 +56,12 @@ run_cmd() {
         "$@"
     fi
 }
+# Define templates
+LOG_RUNNER_TEMPLATE="rules/flipper-runners.logrotate.template"
+UDEV_TEMPLATE="rules/99-udev-flipper-zero.rules.template"
+BINDER_TEMPLATE="services/github-runner-binder@.service.template"
+UNBINDER_TEMPLATE="services/github-runner-unbinder@.service.template"
+SERVICE_TEMPLATE="services/github-runner-flip.service.template"
 
 # Define installation paths.
 BASE_DIR="/opt/flipper-runner"
@@ -87,7 +93,7 @@ run_cmd cp -r services/* "$SERVICES_DIR/"
 # Install the udev rule if not already present.
 if [ ! -f "$UDEV_RULE" ]; then
     echo "Installing udev rule..."
-    run_cmd cp 99-udev-flipper-zero.rule.template "$UDEV_RULE"
+    run_cmd cp "$UDEV_TEMPLATE" "$UDEV_RULE"
     if [ "$SIMULATE" = true ]; then
         echo "SIMULATE: udevadm control --reload-rules && udevadm trigger"
     else
@@ -98,8 +104,6 @@ else
 fi
 
 # Install binder and unbinder service if not already present.
-BINDER_TEMPLATE="services/github-runner-binder@.service.template"
-UNBINDER_TEMPLATE="services/github-runner-unbinder@.service.template"
 if [ ! -f "$BINDER_SERVICE" ]; then
     echo "Installing binder service..."
     run_cmd cp "$BINDER_TEMPLATE" "$BINDER_SERVICE"
@@ -114,7 +118,6 @@ else
 fi
 
 # Install the systemd service using the template.
-SERVICE_TEMPLATE="services/github-runner-flip.service.template"
 if [ -f "$SERVICE_TEMPLATE" ]; then
     echo "Installing systemd service for Flipper runner..."
     if [ "$SIMULATE" = true ]; then
@@ -142,8 +145,17 @@ echo "Installing service binaries..."
 run_cmd cp services/flipper-binder.sh /usr/local/bin/
 run_cmd cp services/flipper-unbinder.sh /usr/local/bin/
 run_cmd cp services/flipper-docker-wrapper.sh /usr/local/bin/
-run_cmd cp services/flipper-monitor-wrapper.sh /usr/local/bin/
 run_cmd chmod +x /usr/local/bin/flipper-*.sh
+
+# Install logrotation configuration
+
+echo "Setting up log rotation..."
+if [ ! -f "/etc/logrotate.d/github-runners" ]; then
+    run_cmd cp $LOG_RUNNER_TEMPLATE /etc/logrotate.d/github-runners
+    run_cmd chmod 644 /etc/logrotate.d/github-runners
+else
+    echo "Log rotation for runners already configured, skipping."
+fi
 
 # Notify the user about additional steps.
 echo "Installation complete!"
