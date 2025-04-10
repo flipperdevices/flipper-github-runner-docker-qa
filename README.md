@@ -13,31 +13,12 @@ The system consists of several components:
 ### Flow
 
 1. **Device Detection**: udev rules detect when Flipper devices are connected and trigger binding services
+2. **Binding**: The binding service creates mounts in `/dev/flipper/`
 2. **Initialization**: The systemd service starts a Python script that locates the specified ST-Link and Flipper devices
 3. **Repair Mode**: Docker container runs in 'REPAIR' state first, which flashes the latest release firmware to the Flipper device
 4. **Normal Mode**: After successful firmware flashing, the container restarts in 'NORMAL' state and registers as a GitHub self-hosted runner
 5. **Job Execution**: The runner picks up jobs with matching tags from GitHub and executes them
 6. **Monitoring**: A dedicated monitoring service tracks the status of all runners and provides metrics
-
-## Project Structure
-
-```
-├── 99-udev-flipper-zero.rule.template   # udev rule template for Flipper device detection
-├── installer.sh                         # Main runner installation script
-├── monitor-installer.sh                 # Monitoring service installation script
-├── scripts/
-│   ├── flipper-docker-runner.py         # Main runner management script
-│   └── github-runner-monitor.py         # Metrics collection script
-└── services/
-    ├── flipper-binder.sh                # Device binding script
-    ├── flipper-docker-wrapper.sh        # Docker wrapper script
-    ├── flipper-monitor-wrapper.sh       # Monitor wrapper script
-    ├── flipper-unbinder.sh              # Device unbinding script
-    ├── github-runner-binder@.service.template    # Systemd service template for binding
-    ├── github-runner-flip.service.template       # Systemd service template for runner
-    ├── github-runner-monitor.service.template    # Systemd service template for monitoring
-    └── github-runner-unbinder@.service.template  # Systemd service template for unbinding
-```
 
 ## Prerequisites
 
@@ -70,9 +51,10 @@ This will:
 
 The `--simulate` flag can be used to preview the changes without actually making them.
 
-After that you need just to build Docker image
+After that you need just to put firmware repo and build Docker image
 ```bash
 cd /var/lib/flipper-docker/
+git clone --branch 1.2.0 git@github.com:flipperdevices/flipperzero-firmware.git
 docker build -t flipper-custom-image:FlipperZeroTest .
 ```
 

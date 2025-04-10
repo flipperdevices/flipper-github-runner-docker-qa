@@ -1,4 +1,3 @@
-qa@qa-runners:~$ cat /etc/systemd/system/github-runner-unbinder@.service
 [Unit]
 Description=Flipper Device Binding Service for %i
 After=dev-tty.target

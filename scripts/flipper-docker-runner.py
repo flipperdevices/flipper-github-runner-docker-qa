@@ -227,7 +227,7 @@ class FlipperDocker:
         hostname = socket.gethostname().split(".", 1)[0]
         volumes = {
             self.toolchain_directory: {"bind": "/opt/toolchain", "mode": "rw"},
-            "/root/.cache/ccache": {"bind": "/root/.cache/ccache", "mode": "rw"},
+            "~/.cache/ccache": {"bind": "/root/.cache/ccache", "mode": "rw"},
             f"/dev/flipper/{self.flipper_id}": {"bind": f"/dev/{self.flipper_id}", "mode": "rw", "propagation": "shared"},
         }
 
