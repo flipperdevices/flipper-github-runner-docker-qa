@@ -58,11 +58,11 @@ run_cmd() {
 }
 
 # Define templates
-LOG_RUNNER_TEMPLATE="rules/flipper-runners.logrotate.template"
-UDEV_TEMPLATE="rules/99-udev-flipper-zero.rules.template"
-BINDER_TEMPLATE="services/github-runner-binder@.service.template"
-UNBINDER_TEMPLATE="services/github-runner-unbinder@.service.template"
-SERVICE_TEMPLATE="services/github-runner-flip.service.template"
+LOG_RUNNER_TEMPLATE="templates/flipper-runners.logrotate.template"
+UDEV_TEMPLATE="templates/99-udev-flipper-zero.rules.template"
+BINDER_TEMPLATE="templates/github-runner-binder@.service.template"
+UNBINDER_TEMPLATE="templates/github-runner-unbinder@.service.template"
+SERVICE_TEMPLATE="templates/github-runner-flip.service.template"
 
 # Define installation paths.
 BASE_DIR="/opt/flipper-runner"

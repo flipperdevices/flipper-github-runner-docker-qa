@@ -48,9 +48,9 @@ WRAPPER_SCRIPT="/usr/local/bin/flipper-monitor-wrapper.sh"
 LOGROTATE_FILE="/etc/logrotate.d/github-runner-metrics"
 # Define templates
 WRAPPER_TEMPLATE="services/flipper-monitor-wrapper.sh"
-SERVICE_TEMPLATE="services/github-runner-monitor.service.template"
+SERVICE_TEMPLATE="templates/github-runner-monitor.service.template"
 MONITOR_SCRIPT_FILE="scripts/github-runner-monitor.py"
-LOGROTATE_TEMPLATE="services/github-runner-metrics.logrotate.template"
+LOGROTATE_TEMPLATE="templates/github-runner-metrics.logrotate.template"
 
 # Create installation directory
 echo "Creating installation directory..."
