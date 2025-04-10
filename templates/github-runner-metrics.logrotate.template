@@ -1,0 +1,12 @@
+/var/log/github-runner-metrics.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+    postrotate
+        systemctl kill -s USR1 github-runner-monitor.service >/dev/null 2>&1 || true
+    endscript
+}

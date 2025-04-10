@@ -14,10 +14,8 @@ import os
 from datetime import datetime
 
 
-# Set up structured logging for systemd journal
 class JournalAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
-        # Add structured fields for systemd journal
         kwargs.setdefault('extra', {})
         return msg, kwargs
 
@@ -68,7 +66,6 @@ class FlipperDocker:
         self.runner_state = state
         self.last_state_change = datetime.now().isoformat()
 
-        # Create structured data for journal
         state_data = {
             "RUNNER_ID": self.flipper_id,
             "RUNNER_STATE": state.value,
@@ -80,12 +77,10 @@ class FlipperDocker:
         if error_message:
             state_data["ERROR_MESSAGE"] = error_message
 
-        # Log as both text and structured data
         log_message = f"Runner state: {state.value}"
         if error_message:
             log_message += f" - Error: {error_message}"
 
-        # Log using JSON formatted string that systemd journal can parse
         self.logger.info(f"{log_message} {json.dumps(state_data)}")
 
     def _create_toolchain_directory(self) -> None:
@@ -129,7 +124,6 @@ class FlipperDocker:
             dockerfile_path = "/var/lib/flipper-docker/"
             image_tag = f"flipper-custom-image:{self.github_tag}"
 
-            # Check if we already have this container running
             try:
                 existing = self.docker_client.containers.get(self.flipper_id)
                 self.logger.info(f"Found existing container '{self.flipper_id}' with status '{existing.status}'")
@@ -147,18 +141,27 @@ class FlipperDocker:
             except Exception as e:
                 self.logger.warning(f"Error handling existing container: {str(e)}")
 
+            try:
+                existing_image = self.docker_client.images.get(image_tag)
+                self.logger.info(f"Image '{image_tag}' already exists with ID '{existing_image.id}'. Skipping build.")
+                self.image = existing_image
+                return
+            except docker.errors.ImageNotFound:
+                self.logger.info(f"Image '{image_tag}' not found. Building new image...")
+            except Exception as e:
+                self.logger.warning(f"Error checking for existing image: {str(e)}")
+                # Continue with build even if image check fails
+
             self.logger.info(
                 f"Building Docker image with tag '{image_tag}' from '{dockerfile_path}'..."
             )
 
-            # Build the image
             image, build_logs = self.docker_client.images.build(
                 path=dockerfile_path,
                 tag=image_tag,
                 rm=True,  # Remove intermediate containers after a successful build
             )
 
-            # Log build output
             for chunk in build_logs:
                 if "stream" in chunk:
                     for line in chunk["stream"].splitlines():
@@ -207,68 +210,12 @@ class FlipperDocker:
         usb_path = self.find_device_by_id_and_get_path(
             device_id=self.st_link_id, device_subsystem="usb"
         )
-        flipper_tty_path = self.find_device_by_id_and_get_path(
-            device_id=self.flipper_id, device_subsystem="tty"
-        )
 
         if tty_path:
-            # Find all symlinks pointing to this device
-            tty_symlinks = self.find_symlinks_to_device(tty_path)
-            tty_device_to_use = tty_symlinks[0] if tty_symlinks else tty_path
-
-            if tty_symlinks:
-                self.logger.debug(f"Found symlinks for {tty_path}: {tty_symlinks}")
-                self.logger.debug(f"Using symlink {tty_device_to_use} for ST-Link device")
-
-            self.device_mappings[tty_device_to_use] = "/dev/tty_stlink"
-            self.devices.append(tty_device_to_use)
-
+            self.device_mappings[tty_path] = "/dev/tty_stlink"
+            self.devices.append(tty_path)
         if usb_path:
             self.devices.append(usb_path)
-
-        if flipper_tty_path:
-            # Try to find symlinks first
-            flipper_symlinks = self.find_symlinks_to_device(flipper_tty_path)
-            flipper_device_to_use = flipper_symlinks[0] if flipper_symlinks else flipper_tty_path
-
-            # Log what we're using
-            if flipper_symlinks:
-                self.logger.debug(f"Found symlinks for {flipper_tty_path}: {flipper_symlinks}")
-                self.logger.debug(f"Using symlink {flipper_device_to_use} for Flipper device")
-
-            # USE THE SYMLINK PATH, not the original
-            # For some reason, flipper does not detect when using ACM0 or if more than 10 are used.
-            self.device_mappings[flipper_device_to_use] = "/dev/ttyACM3"
-            self.devices.append(flipper_device_to_use)
-
-        self.logger.debug(f"Final devices: {self.devices}")
-        self.logger.debug(f"Device mappings: {self.device_mappings}")
-
-    def find_symlinks_to_device(self, target_path):
-        """Find all symlinks pointing to the given device path"""
-        symlinks = []
-        try:
-            # Resolve to absolute path if it's a relative symlink
-            target_real_path = os.path.realpath(target_path)
-
-            # Common locations for device symlinks
-            device_dirs = ['/dev', '/dev/serial/by-id', '/dev/serial/by-path']
-
-            for dir_path in device_dirs:
-                if not os.path.exists(dir_path):
-                    continue
-
-                for filename in os.listdir(dir_path):
-                    full_path = os.path.join(dir_path, filename)
-                    if os.path.islink(full_path):
-                        # Check if this symlink points to our target
-                        if os.path.realpath(full_path) == target_real_path:
-                            symlinks.append(full_path)
-
-            return symlinks
-        except Exception as e:
-            self.logger.warning(f"Error finding symlinks for {target_path}: {str(e)}")
-            return []
 
     def create_docker_container(self) -> None:
         if not self.image:
@@ -281,6 +228,7 @@ class FlipperDocker:
         volumes = {
             self.toolchain_directory: {"bind": "/opt/toolchain", "mode": "rw"},
             "/root/.cache/ccache": {"bind": "/root/.cache/ccache", "mode": "rw"},
+            f"/dev/flipper/{self.flipper_id}": {"bind": f"/dev/{self.flipper_id}", "mode": "rw", "propagation": "shared"},
         }
 
         device_mappings = []
@@ -339,6 +287,8 @@ class FlipperDocker:
                 volumes=volumes,
                 auto_remove=True,
                 detach=True,
+                device_cgroup_rules=['c 166:* rwm'],
+                cap_add=["SYS_ADMIN"],
                 command=["/entrypoint.sh", self.flipper_id, self.st_link_id],
             )
 
@@ -418,11 +368,10 @@ class FlipperDocker:
                 self.logger.info(f"Waiting {timeout_sec} seconds for flipper to boot!")
                 time.sleep(timeout_sec)
 
-        # If we've completed all run levels successfully, we should be ONLINE
         if self.runner_state != RunnerState.ERROR:
             self.report_state(RunnerState.ONLINE)
 
-        atexit.unregister(self.at_exit)  # Container already exited and removed
+        atexit.unregister(self.at_exit)
 
 
 if __name__ == "__main__":

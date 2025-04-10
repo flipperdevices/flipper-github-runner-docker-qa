@@ -2,7 +2,6 @@
 
 set -euo pipefail;
 
-
 FLIPPER_ID=$2
 ST_LINK_ID=$3
 
@@ -18,8 +17,13 @@ echo "ST_LINK_ID=$ST_LINK_ID" >> /etc/environment
 timestamp=$(date +%Y%m%d_%H%M%S)
 log_file="/opt/toolchain/logs/${FLIPPER_ID}_${timestamp}_${RUN_LEVEL}.log"
 
-/opt/serial_monitor.py "$FLIPPER_ID" --run-level "$RUN_LEVEL" --output "$log_file" &
+/opt/serial_monitor.py "$FLIPPER_ID" --run-level "$RUN_LEVEL" --output "$log_file" --device-path /dev/tty_stlink &
 MONITOR_PID=$!
+
+ls -l /dev/$FLIPPER_ID
+ln -s /dev/$FLIPPER_ID/$FLIPPER_ID /dev/tty_$FLIPPER_ID
+export FLIPPER_PATH=/dev/tty_$FLIPPER_ID
+echo "FLIPPER_PATH=$FLIPPER_PATH" >> /etc/environment
 
 function cleanup() {
     echo "Cleaning up..."
@@ -57,8 +61,8 @@ function flash_release_to_flipper() {
     echo "Start flashing the flipper"
     $FWFLASH_CMD
 
-
     echo "Flashing done!";
+    $AWAIT_FLIPPER;
     set +e;
     sleep 1;
     set -e;

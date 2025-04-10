@@ -1,253 +1,155 @@
 #!/bin/bash
-
 set -euo pipefail
 
-# Default to normal mode (not simulating)
+# Usage: installer.sh --flipper=flip_SERIAL --stlink=STLINKSERIAL [--simulate --github-tag=GITHUBTAG]
+
+# Default values for optional parameters.
 SIMULATE=false
+GITHUB_TAG="FlipperZeroTest"
 
-# Parse named parameters
-FLIPPER_ID=""
-ST_LINK_ID=""
+# Parse command-line arguments.
+FLIPPER_SERIAL=""
+STLINK_SERIAL=""
 
-for i in "$@"; do
-    case $i in
-        --flipper-id=*)
-        FLIPPER_ID="${i#*=}"
-        shift
-        ;;
+for arg in "$@"; do
+    case $arg in
+        --flipper=*)
+            FLIPPER_SERIAL="${arg#*=}"
+            ;;
         --stlink=*)
-        ST_LINK_ID="${i#*=}"
-        shift
-        ;;
+            STLINK_SERIAL="${arg#*=}"
+            ;;
         --simulate)
-        SIMULATE=true
-        shift
-        ;;
+            SIMULATE=true
+            ;;
+        --github-tag=*)
+            GITHUB_TAG="${arg#*=}"
+            ;;
         *)
-        # Unknown option
-        ;;
+            echo "Unknown option: $arg"
+            exit 1
+            ;;
     esac
 done
 
-# Validate required parameters
-if [ -z "$FLIPPER_ID" ] || [ -z "$ST_LINK_ID" ]; then
-    echo "Usage: $0 --flipper-id=FLIPPER_ID --stlink=ST_LINK_ID [--simulate]"
-    echo "Example: $0 --flipper-id=flip_abc123 --stlink=xyz789"
-    echo "  --simulate    Run in simulation mode (show commands but don't execute)"
+if [ -z "$FLIPPER_SERIAL" ] || [ -z "$STLINK_SERIAL" ]; then
+    echo "Usage: $0 --flipper=flip_SERIAL --stlink=STLINKSERIAL [--simulate --github-tag=GITHUBTAG]"
     exit 1
 fi
 
-# Check if script is run as root when not in simulation mode
-if [ "$EUID" -ne 0 ] && [ "$SIMULATE" = false ]; then
-    echo "Please run as root"
+# Require root for real execution.
+if [ "$SIMULATE" = false ] && [ "$EUID" -ne 0 ]; then
+    echo "Please run as root."
     exit 1
 fi
 
-# Define a function to either execute or simulate a command
+echo "Starting installation for Flipper: $FLIPPER_SERIAL, ST-Link: $STLINK_SERIAL (GitHub tag: $GITHUB_TAG)"
+if [ "$SIMULATE" = true ]; then
+    echo "Running in simulation mode. Commands will be printed instead of executed."
+fi
+
+# A wrapper to either execute or simulate a command.
 run_cmd() {
     if [ "$SIMULATE" = true ]; then
-        echo "SIMULATION: "
-        echo "$@"
+        echo "SIMULATE: $*"
     else
         "$@"
     fi
 }
 
-# Function to safely write to a file
-write_file() {
-    local file="$1"
-    local content="$2"
+# Define templates
+LOG_RUNNER_TEMPLATE="templates/flipper-runners.logrotate.template"
+UDEV_TEMPLATE="templates/99-udev-flipper-zero.rules.template"
+BINDER_TEMPLATE="templates/github-runner-binder@.service.template"
+UNBINDER_TEMPLATE="templates/github-runner-unbinder@.service.template"
+SERVICE_TEMPLATE="templates/github-runner-flip.service.template"
 
-    if [ "$SIMULATE" = true ]; then
-        echo "SIMULATION: would write to file: $file"
-        echo "---- File content ----"
-        echo "$content"
-        echo "----------------------"
-    else
-        echo "$content" > "$file"
-    fi
-}
+# Define installation paths.
+BASE_DIR="/opt/flipper-runner"
+DOCKER_DIR="${BASE_DIR}/docker"
+SCRIPTS_DIR="${BASE_DIR}/scripts"
+SERVICES_DIR="${BASE_DIR}/services"
+UDEV_RULE="/etc/udev/rules.d/99-udev-flipper-zero.rules"
+SYSTEMD_DIR="/etc/systemd/system"
+BINDER_SERVICE="${SYSTEMD_DIR}/github-runner-binder@.service"
+UNBINDER_SERVICE="${SYSTEMD_DIR}/github-runner-unbinder@.service"
+SERVICE_FILE="/etc/systemd/system/github-runner-flip-${FLIPPER_SERIAL}.service"
 
-# Function to safely append to a file
-append_file() {
-    local file="$1"
-    local content="$2"
+# Create necessary directories.
+echo "Creating installation directories..."
+run_cmd mkdir -p "$BASE_DIR" "$DOCKER_DIR" "$SCRIPTS_DIR" "$SERVICES_DIR"
 
-    if [ "$SIMULATE" = true ]; then
-        echo "SIMULATION: would append to file: $file"
-        echo "---- Content to append ----"
-        echo "$content"
-        echo "---------------------------"
-    else
-        echo "$content" >> "$file"
-    fi
-}
-
-echo "Installing Flipper GitHub Runner for:"
-echo "Flipper ID: $FLIPPER_ID"
-echo "ST-Link ID: $ST_LINK_ID"
-echo "Simulation mode: $SIMULATE"
-
-# Define installation paths
-INSTALL_DIR="/opt/flipper-runners"
-VENV_DIR="${INSTALL_DIR}/${FLIPPER_ID}/venv"
-SCRIPTS_DIR="${INSTALL_DIR}/scripts"
-CONFIG_DIR="/var/lib/flipper-docker"
-WRAPPER_SCRIPT="/usr/local/bin/flipper-docker-wrapper.sh"
-
-# Install system dependencies
-echo "Installing system dependencies..."
-run_cmd apt-get update
-run_cmd apt-get install -y docker-ce ccache python3-venv python3-dev logrotate
-
-# Create required directories
-echo "Setting up directories..."
-run_cmd mkdir -p "${INSTALL_DIR}"
-run_cmd mkdir -p "${SCRIPTS_DIR}"
-run_cmd mkdir -p "${CONFIG_DIR}"
-run_cmd mkdir -p "/opt/${FLIPPER_ID}/logs"
-
-# Set up Python virtual environment
-echo "Setting up Python virtual environment..."
-run_cmd python3 -m venv ${VENV_DIR}
-run_cmd ${VENV_DIR}/bin/pip install --upgrade pip
-run_cmd ${VENV_DIR}/bin/pip install pyudev docker pygelf
-
-# Copy Docker-related files
+# Copy Docker files.
 echo "Copying Docker files..."
-run_cmd cp -r docker/* ${CONFIG_DIR}/
+run_cmd cp -r docker/* "$DOCKER_DIR/"
 
-# Copy Python scripts
-echo "Installing Python scripts..."
-run_cmd cp scripts/flipper_docker.py ${SCRIPTS_DIR}/
-run_cmd chmod +x ${SCRIPTS_DIR}/flipper_docker.py
+# Copy runner scripts.
+echo "Copying scripts..."
+run_cmd cp -r scripts/* "$SCRIPTS_DIR/"
 
-# Create a wrapper script to activate the virtual environment
-echo "Creating wrapper script..."
-WRAPPER_CONTENT="#!/bin/bash
-source ${VENV_DIR}/bin/activate
-exec python ${SCRIPTS_DIR}/flipper_docker.py \"\$@\"
-"
-write_file "${WRAPPER_SCRIPT}" "${WRAPPER_CONTENT}"
-run_cmd chmod +x ${WRAPPER_SCRIPT}
+# Copy service scripts
+echo "Copying service scripts..."
+run_cmd cp -r services/* "$SERVICES_DIR/"
 
-# Add udev rules creation
-echo "Creating udev rules for devices..."
-
-# Determine the next available numbers for Flipper (1XX) and ST-Link (2XX)
-UDEV_RULES_FILE="/etc/udev/rules.d/99-flipper-devices.rules"
-
-# Create the file if it doesn't exist
-if [ ! -f "$UDEV_RULES_FILE" ] || [ "$SIMULATE" = true ]; then
-    run_cmd touch "$UDEV_RULES_FILE"
+# Install the udev rule if not already present.
+if [ ! -f "$UDEV_RULE" ]; then
+    echo "Installing udev rule..."
+    run_cmd cp "$UDEV_TEMPLATE" "$UDEV_RULE"
+    run_cmd udevadm control --reload-rules
+    run_cmd udevadm trigger
+else
+    echo "Udev rule already exists, skipping installation."
 fi
 
-# Function to find the next available number
-find_next_number() {
-    local prefix=$1
-    local existing_numbers=""
+# Install binder and unbinder service if not already present.
+if [ ! -f "$BINDER_SERVICE" ]; then
+    echo "Installing binder service..."
+    run_cmd cp "$BINDER_TEMPLATE" "$BINDER_SERVICE"
+    run_cmd cp "$UNBINDER_TEMPLATE" "$UNBINDER_SERVICE"
+    run_cmd systemctl daemon-reload
+else
+    echo "Binder service already exists, skipping installation."
+fi
 
-    # Check if the file exists before attempting to read from it
-    if [ -f "$UDEV_RULES_FILE" ]; then
-        # Look for the last used number for this prefix in the file
-        # Use grep -o to extract just the matching part, then sed to get just the number
-        existing_numbers=$(grep -o "${prefix}[0-9][0-9][0-9]\\?" "$UDEV_RULES_FILE" 2>/dev/null | sed "s/${prefix}//g" | sort -n)
-    fi
-
-    if [ -z "$existing_numbers" ]; then
-        echo "10" # Start with 10 if no existing entries
+# Install the systemd service using the template.
+if [ -f "$SERVICE_TEMPLATE" ]; then
+    echo "Installing systemd service for Flipper runner..."
+    # Special handling for the sed command
+    if [ "$SIMULATE" = true ]; then
+        echo "SIMULATE: sed -e \"s/__FLIPPER_SERIAL__/${FLIPPER_SERIAL}/g\" -e \"s/__STLINK_SERIAL__/${STLINK_SERIAL}/g\" -e \"s/__GITHUB_RUNNER_TAG__/${GITHUB_TAG}/g\" \"$SERVICE_TEMPLATE\" > \"$SERVICE_FILE\""
     else
-        local last_number=$(echo "$existing_numbers" | tail -1)
-        echo $((last_number + 10)) # Increment by 10 for spacing
+        sed -e "s/__FLIPPER_SERIAL__/${FLIPPER_SERIAL}/g" -e "s/__STLINK_SERIAL__/${STLINK_SERIAL}/g" -e "s/__GITHUB_RUNNER_TAG__/${GITHUB_TAG}/g" "$SERVICE_TEMPLATE" > "$SERVICE_FILE"
     fi
-}
-
-# Find next available numbers
-FLIPPER_NUM=$(find_next_number "ttyACM1")
-STLINK_NUM=$(find_next_number "ttyACM2")
-
-# Create formatted numbers
-FLIPPER_LINK="ttyACM1${FLIPPER_NUM}"
-STLINK_LINK="ttyACM2${STLINK_NUM}"
-
-echo "Creating device links: Flipper → ${FLIPPER_LINK}, ST-Link → ${STLINK_LINK}"
-
-# Add rules to the udev rules file
-if [ "$SIMULATE" = true ] || ! grep -q "ATTRS{serial}==\"${FLIPPER_ID}\"" "$UDEV_RULES_FILE" 2>/dev/null; then
-    FLIPPER_RULE="ACTION==\"add\", SUBSYSTEM==\"tty\", SUBSYSTEMS==\"usb\", ATTRS{serial}==\"${FLIPPER_ID}\", SYMLINK+=\"${FLIPPER_LINK}\""
-    append_file "$UDEV_RULES_FILE" "$FLIPPER_RULE"
+else
+    echo "Service template ${SERVICE_TEMPLATE} not found!"
+    exit 1
 fi
 
-if [ "$SIMULATE" = true ] || ! grep -q "ATTRS{serial}==\"${ST_LINK_ID}\"" "$UDEV_RULES_FILE" 2>/dev/null; then
-    STLINK_RULE="ACTION==\"add\", SUBSYSTEM==\"tty\", SUBSYSTEMS==\"usb\", ATTRS{serial}==\"${ST_LINK_ID}\", SYMLINK+=\"${STLINK_LINK}\""
-    append_file "$UDEV_RULES_FILE" "$STLINK_RULE"
-fi
-
-# Reload udev rules
-echo "Reloading udev rules..."
-run_cmd udevadm control --reload-rules
-run_cmd udevadm trigger
-
-# Create service file
-echo "Creating systemd service..."
-SERVICE_CONTENT="[Unit]
-Description=Dockerized github runner ${FLIPPER_ID}
-After=docker.service
-Requires=docker.service
-
-[Service]
-TimeoutStartSec=0
-Restart=always
-ExecStart=${WRAPPER_SCRIPT} ${FLIPPER_ID} ${ST_LINK_ID} FlipperZeroTest
-KillSignal=SIGINT
-
-[Install]
-WantedBy=multi-user.target
-"
-write_file "/etc/systemd/system/github-runner-${FLIPPER_ID}.service" "$SERVICE_CONTENT"
-
-# Configure Docker logging
-echo "Configuring Docker logging..."
-run_cmd mkdir -p /etc/docker
-DOCKER_CONFIG='{
-    "log-driver": "journald"
-}'
-write_file "/etc/docker/daemon.json" "$DOCKER_CONFIG"
-
-# Configure log rotation
-echo "Configuring log rotation..."
-LOGROTATE_FILE="/etc/logrotate.d/flipper-${FLIPPER_ID}"
-LOGROTATE_CONTENT="/opt/${FLIPPER_ID}/logs/*.log {
-    daily
-    rotate 14
-    compress
-    delaycompress
-    missingok
-    notifempty
-    dateext
-    create 0644 root root
-}"
-write_file "$LOGROTATE_FILE" "$LOGROTATE_CONTENT"
-
-# Reload systemd and enable service
-echo "Configuring systemd service..."
+# Reload systemd and enable the new service.
+echo "Reloading systemd daemon and enabling the service..."
 run_cmd systemctl daemon-reload
-run_cmd systemctl restart docker
-run_cmd systemctl enable "github-runner-${FLIPPER_ID}"
+run_cmd systemctl enable "github-runner-flip-${FLIPPER_SERIAL}"
 
+# Install service binaries
+echo "Installing service binaries..."
+run_cmd cp services/flipper-binder.sh /usr/local/bin/
+run_cmd cp services/flipper-unbinder.sh /usr/local/bin/
+run_cmd cp services/flipper-docker-wrapper.sh /usr/local/bin/
+run_cmd chmod +x /usr/local/bin/flipper-*.sh
+
+# Install logrotation configuration
+echo "Setting up log rotation..."
+if [ ! -f "/etc/logrotate.d/github-runners" ]; then
+    run_cmd cp $LOG_RUNNER_TEMPLATE /etc/logrotate.d/github-runners
+    run_cmd chmod 644 /etc/logrotate.d/github-runners
+else
+    echo "Log rotation for runners already configured, skipping."
+fi
+
+# Notify the user about additional steps.
 echo "Installation complete!"
-echo ""
-echo "Please ensure you have placed the following files in ${CONFIG_DIR}:"
-echo "1. flipper-docker.cfg with GitHub credentials"
-echo "2. region_data"
-echo ""
-echo "Installation directory: ${INSTALL_DIR}"
-echo "Python virtual environment: ${VENV_DIR}"
-echo "Log files: /opt/${FLIPPER_ID}/logs/"
-echo ""
-echo "To start the service, run:"
-echo "systemctl start github-runner-${FLIPPER_ID}"
-echo ""
-echo "Device symlinks created:"
-echo "- Flipper: /dev/${FLIPPER_LINK}"
-echo "- ST-Link: /dev/${STLINK_LINK}"
+echo "Next steps:"
+echo "1. Check out the flipper-firmware repository into the Docker folder: ${DOCKER_DIR}"
+echo "2. Build the Docker container for this host (e.g., docker build -t flipper-runner:latest ${DOCKER_DIR})"
+echo "3. Start the service: systemctl start github-runner-flip-${FLIPPER_SERIAL}"
+echo "4. Verify the service status: systemctl status github-runner-flip-${FLIPPER_SERIAL}"
