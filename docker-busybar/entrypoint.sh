@@ -90,12 +90,9 @@ EOF
 if [[ "$RUN_LEVEL" == "NORMAL" ]]; then
     echo "Starting runner..";
     cd /actions-runner
-    /entrypoint.sh ./bin/Runner.Listener run --startuptype service;
 elif [[ "$RUN_LEVEL" == "REPAIR" ]]; then
     echo "App running into repair mode, restarting container..";
     flash_busybar;
-    exit 0;
 else
     echo "Wrong RUN_LEVEL, exiting with fail..";
-    exit 2;
 fi

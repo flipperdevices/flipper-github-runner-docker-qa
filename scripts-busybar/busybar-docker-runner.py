@@ -269,7 +269,7 @@ class BusyBarDocker:
         hostname = socket.gethostname().split(".", 1)[0]
         volumes = {
             self.toolchain_directory: {"bind": "/opt/toolchain", "mode": "rw"},
-            "~/.cache/ccache": {"bind": "/root/.cache/ccache", "mode": "rw"},
+            "/root/.cache/ccache": {"bind": "/root/.cache/ccache", "mode": "rw"},
             f"/dev/busybar/{self.busybar_id}": {"bind": f"/dev/{self.busybar_id}", "mode": "rw",
                                                 "propagation": "shared"},
         }
@@ -325,7 +325,7 @@ class BusyBarDocker:
             # Network mode host to access BusyBar at 10.0.4.20
             self.container = self.docker_client.containers.run(
                 image=self.image.tags[0],
-                name=self.busybar_id,
+                name='Busy'+self.busybar_id,
                 environment=environment,
                 devices=device_mappings,
                 volumes=volumes,
@@ -432,6 +432,3 @@ if __name__ == "__main__":
     )
     busybar_docker.run()
 
-# ====================
-# docker-busybar/entrypoint-busybar.sh
-# ====================
