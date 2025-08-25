@@ -47,12 +47,12 @@ function flash_busybar() {
     echo "Flashing done!";
     sleep 5;
 
-if [[ "$RUN_LEVEL" == "NORMAL" ]]; then
-    echo "Starting runner..";
-    cd /actions-runner
-elif [[ "$RUN_LEVEL" == "REPAIR" ]]; then
-    echo "App running into repair mode, restarting container..";
-    flash_busybar;
-else
-    echo "Wrong RUN_LEVEL, exiting with fail..";
-fi
+#if [[ "$RUN_LEVEL" == "NORMAL" ]]; then
+#    echo "Starting runner..";
+#    cd /actions-runner
+#elif [[ "$RUN_LEVEL" == "REPAIR" ]]; then
+#    echo "App running into repair mode, restarting container..";
+#    flash_busybar;
+#else
+#    echo "Wrong RUN_LEVEL, exiting with fail..";
+#fi
