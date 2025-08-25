@@ -19,7 +19,7 @@ log_file="/opt/toolchain/logs/${BUSYBAR_ID}_${timestamp}_${RUN_LEVEL}.log"
 mkdir -p /opt/toolchain/logs
 
 # Start UART monitor for u5 CPU
-/opt/uart_monitor.py "$BUSYBAR_ID" --run-level "$RUN_LEVEL" --output "$log_file" --device-path /dev/tty_busybar_u5 &
+#/opt/uart_monitor.py "$BUSYBAR_ID" --run-level "$RUN_LEVEL" --output "$log_file" --device-path /dev/tty_busybar_u5 &
 MONITOR_PID=$!
 
 function cleanup() {
