@@ -1,0 +1,10 @@
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="37c1", ATTRS{idProduct}=="6213", \
+    RUN+="/bin/bash -c 'echo BUSYBAR_CONNECTED > /run/busybar_$env{ID_SERIAL_SHORT}.env && \
+    systemctl start github-runner-busybar-binder@$env{ID_SERIAL_SHORT}.service'"
+
+ACTION=="remove", SUBSYSTEM=="usb", ATTRS{idVendor}=="37c1", ATTRS{idProduct}=="6213", \
+    RUN+="/bin/bash -c 'systemctl start github-runner-busybar-unbinder@$env{ID_SERIAL_SHORT}.service'"
+
+# Blackmagic ESP32 UART device
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="4001", \
+    RUN+="/bin/bash -c 'echo BLACKMAGIC_PATH=$env{DEVNAME} >> /run/busybar_blackmagic.env'"

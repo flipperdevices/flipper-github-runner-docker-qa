@@ -1,0 +1,13 @@
+[Unit]
+Description=BusyBar Device Binding Service for %i
+After=dev-tty.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/usr/local/bin/busybar-binder.sh %i
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

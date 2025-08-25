@@ -1,0 +1,14 @@
+[Unit]
+Description=Dockerized github runner BusyBar __BUSYBAR_SERIAL__
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+TimeoutStartSec=0
+Restart=always
+ExecStart=/usr/local/bin/busybar-docker-wrapper.sh __BUSYBAR_SERIAL__ __BLACKMAGIC_SERIAL__ __GITHUB_RUNNER_TAG__
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

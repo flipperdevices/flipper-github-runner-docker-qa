@@ -1,0 +1,22 @@
+[Unit]
+Description=BusyBar GitHub Runner Metrics Collector
+After=docker.service node_exporter.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/busybar-monitor-wrapper.sh --daemon -i 10
+Restart=always
+RestartSec=30
+
+SupplementaryGroups=systemd-journal
+
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/opt/busybar-monitor /var/lib/node_exporter/textfile_collector /var/log
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

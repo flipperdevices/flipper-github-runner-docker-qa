@@ -1,0 +1,13 @@
+/opt/busybar-runner/*/logs/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+    sharedscripts
+    postrotate
+        systemctl kill -s USR1 'github-runner-busybar-*' >/dev/null 2>&1 || true
+    endscript
+}

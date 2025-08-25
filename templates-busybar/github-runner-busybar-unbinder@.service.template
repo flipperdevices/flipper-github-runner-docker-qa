@@ -1,0 +1,13 @@
+[Unit]
+Description=BusyBar Device Unbinding Service for %i
+After=dev-tty.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/usr/local/bin/busybar-unbinder.sh %i
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

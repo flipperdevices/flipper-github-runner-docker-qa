@@ -58,17 +58,17 @@ run_cmd() {
 }
 
 # Define templates
-LOG_RUNNER_TEMPLATE="templates/flipper-runners.logrotate.template"
-UDEV_TEMPLATE="templates/99-udev-flipper-zero.rules.template"
-BINDER_TEMPLATE="templates/github-runner-binder@.service.template"
-UNBINDER_TEMPLATE="templates/github-runner-unbinder@.service.template"
-SERVICE_TEMPLATE="templates/github-runner-flip.service.template"
+LOG_RUNNER_TEMPLATE="templates-flipper/flipper-runners.logrotate.template"
+UDEV_TEMPLATE="templates-flipper/99-udev-flipper-zero.rules.template"
+BINDER_TEMPLATE="templates-flipper/github-runner-binder@.service.template"
+UNBINDER_TEMPLATE="templates-flipper/github-runner-unbinder@.service.template"
+SERVICE_TEMPLATE="templates-flipper/github-runner-flip.service.template"
 
 # Define installation paths.
 BASE_DIR="/opt/flipper-runner"
-DOCKER_DIR="${BASE_DIR}/docker"
-SCRIPTS_DIR="${BASE_DIR}/scripts"
-SERVICES_DIR="${BASE_DIR}/services"
+DOCKER_DIR="${BASE_DIR}/docker-flipper"
+SCRIPTS_DIR="${BASE_DIR}/scripts-flipper"
+SERVICES_DIR="${BASE_DIR}/services-flipper"
 UDEV_RULE="/etc/udev/rules.d/99-udev-flipper-zero.rules"
 SYSTEMD_DIR="/etc/systemd/system"
 BINDER_SERVICE="${SYSTEMD_DIR}/github-runner-binder@.service"
@@ -132,9 +132,9 @@ run_cmd systemctl enable "github-runner-flip-${FLIPPER_SERIAL}"
 
 # Install service binaries
 echo "Installing service binaries..."
-run_cmd cp services/flipper-binder.sh /usr/local/bin/
-run_cmd cp services/flipper-unbinder.sh /usr/local/bin/
-run_cmd cp services/flipper-docker-wrapper.sh /usr/local/bin/
+run_cmd cp services-flipper/flipper-binder.sh /usr/local/bin/
+run_cmd cp services-flipper/flipper-unbinder.sh /usr/local/bin/
+run_cmd cp services-flipper/flipper-docker-wrapper.sh /usr/local/bin/
 run_cmd chmod +x /usr/local/bin/flipper-*.sh
 
 # Install logrotation configuration
