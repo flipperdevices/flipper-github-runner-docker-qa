@@ -329,7 +329,7 @@ class BusyBarDocker:
                 environment=environment,
                 devices=device_mappings,
                 volumes=volumes,
-                auto_remove=True,
+                auto_remove=False,
                 detach=True,
                 network_mode="host",  # Important for BusyBar telnet access
                 device_cgroup_rules=['c 166:* rwm', 'c 188:* rwm'],  # ttyUSB and ttyACM
