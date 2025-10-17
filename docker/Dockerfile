@@ -1,4 +1,4 @@
-FROM myoung34/github-runner:2.323.0-ubuntu-jammy
+FROM myoung34/github-runner:latest
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG FirmwareVersion=1.1.2
@@ -29,5 +29,5 @@ COPY entrypoint.sh /opt/
 COPY region_data /
 COPY flipperzero-firmware /opt/flipperzero-firmware
 COPY serial_monitor.py /opt/
-RUN chmod +x /opt/entrypoint.sh
+RUN chmod +x /opt/entrypoint.sh /opt/serial_monitor.py
 ENTRYPOINT ["/opt/entrypoint.sh"]

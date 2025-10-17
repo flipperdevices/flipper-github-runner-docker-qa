@@ -69,6 +69,9 @@ BASE_DIR="/opt/flipper-runner"
 DOCKER_DIR="${BASE_DIR}/docker"
 SCRIPTS_DIR="${BASE_DIR}/scripts"
 SERVICES_DIR="${BASE_DIR}/services"
+RUNNER_DIR="${BASE_DIR}/${FLIPPER_SERIAL}"
+VENV_DIR="${RUNNER_DIR}/venv"
+LOG_DIR="${RUNNER_DIR}/logs"
 UDEV_RULE="/etc/udev/rules.d/99-udev-flipper-zero.rules"
 SYSTEMD_DIR="/etc/systemd/system"
 BINDER_SERVICE="${SYSTEMD_DIR}/github-runner-binder@.service"
@@ -77,7 +80,7 @@ SERVICE_FILE="/etc/systemd/system/github-runner-flip-${FLIPPER_SERIAL}.service"
 
 # Create necessary directories.
 echo "Creating installation directories..."
-run_cmd mkdir -p "$BASE_DIR" "$DOCKER_DIR" "$SCRIPTS_DIR" "$SERVICES_DIR"
+run_cmd mkdir -p "$BASE_DIR" "$DOCKER_DIR" "$SCRIPTS_DIR" "$SERVICES_DIR" "$RUNNER_DIR" "$LOG_DIR"
 
 # Copy Docker files.
 echo "Copying Docker files..."
@@ -145,6 +148,18 @@ if [ ! -f "/etc/logrotate.d/github-runners" ]; then
 else
     echo "Log rotation for runners already configured, skipping."
 fi
+
+# Prepare Python environment for the runner.
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating Python virtual environment for ${FLIPPER_SERIAL}..."
+    run_cmd python3 -m venv "$VENV_DIR"
+else
+    echo "Virtual environment already exists at ${VENV_DIR}, reusing."
+fi
+
+echo "Installing Python dependencies into runner virtual environment..."
+run_cmd "$VENV_DIR/bin/pip" install --upgrade pip
+run_cmd "$VENV_DIR/bin/pip" install --upgrade pyudev docker pygelf
 
 # Notify the user about additional steps.
 echo "Installation complete!"

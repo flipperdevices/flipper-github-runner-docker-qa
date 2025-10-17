@@ -16,8 +16,18 @@ echo "ST_LINK_ID=$ST_LINK_ID" >> /etc/environment
 
 timestamp=$(date +%Y%m%d_%H%M%S)
 log_file="/opt/toolchain/logs/${FLIPPER_ID}_${timestamp}_${RUN_LEVEL}.log"
+primary_serial="${ST_LINK_PRIMARY_TTY:-/dev/tty_stlink}"
+serial_path="${ST_LINK_LOG_TTY:-$primary_serial}"
 
-/opt/serial_monitor.py "$FLIPPER_ID" --run-level "$RUN_LEVEL" --output "$log_file" --device-path /dev/tty_stlink &
+echo "Primary ST-Link TTY: ${primary_serial}"
+if [ "${serial_path}" != "${primary_serial}" ]; then
+    echo "Log ST-Link TTY: ${serial_path}"
+fi
+if [ -n "${ST_LINK_AUX_TTYS:-}" ]; then
+    echo "Auxiliary ST-Link TTYs: ${ST_LINK_AUX_TTYS}"
+fi
+
+/opt/serial_monitor.py "$FLIPPER_ID" --run-level "$RUN_LEVEL" --output "$log_file" --device-path "${serial_path}" &
 MONITOR_PID=$!
 
 ls -l /dev/$FLIPPER_ID
@@ -40,8 +50,8 @@ function flash_release_to_flipper() {
     source scripts/toolchain/fbtenv.sh
 
     FWFLASH_CMD="python3 scripts/fwflash.py --interface=auto --serial=$ST_LINK_ID /opt/flipperzero-firmware/firmware.bin"
-    AWAIT_FLIPPER="python3 scripts/testops.py -t=30 await_flipper"
-    FORMAT_EXT="python3 scripts/storage.py format_ext -p auto"
+    AWAIT_FLIPPER="python3 scripts/testops.py -p $FLIPPER_PATH -t=30 await_flipper"
+    FORMAT_EXT="python3 scripts/storage.py -p $FLIPPER_PATH format_ext"
 
     echo "Waiting for flipper"
     if timeout 35s $AWAIT_FLIPPER; then

@@ -1,17 +1,20 @@
-import time
 import json
-import pyudev
-import docker
-import socket
 import atexit
 import pathlib
 import logging
+import socket
+import time
 import argparse
 import configparser
 from enum import Enum
-from pygelf import GelfHttpsHandler
 import os
 from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+
+import glob
+import docker
+import pyudev
+from pygelf import GelfHttpsHandler
 
 
 class JournalAdapter(logging.LoggerAdapter):
@@ -48,14 +51,16 @@ class FlipperDocker:
         self.flipper_id = flipper_id
         self.st_link_id = st_link_id
         self.github_tag = github_tag
-        self.devices = []
-        self.device_mappings = {}
+        self.devices: List[str] = []
+        self.device_mappings: Dict[str, str] = {}
         self.toolchain_directory = f"/opt/{self.flipper_id}"
+        self.ccache_directory = pathlib.Path(os.path.expanduser("~/.cache/ccache"))
         self.run_level = self.RunLevel.REPAIR
         self.container = None
         self.image = None
         self.runner_state = RunnerState.OFFLINE
         self.last_state_change = datetime.now().isoformat()
+        self.config = configparser.ConfigParser()
         self._parse_config()
         self._init_logs()
         self._build_image()
@@ -85,13 +90,15 @@ class FlipperDocker:
 
     def _create_toolchain_directory(self) -> None:
         pathlib.Path(self.toolchain_directory).mkdir(parents=True, exist_ok=True)
+        try:
+            self.ccache_directory.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            self.logger.warning(f"Unable to create ccache directory at {self.ccache_directory}")
 
     def _parse_config(self):
         try:
             config_file_path = "/var/lib/flipper-docker/flipper-docker.cfg"
-            config = configparser.ConfigParser()
-            config.read(config_file_path)
-            self.config = config
+            self.config.read(config_file_path)
         except Exception as e:
             self.logger.exception("Failed to parse configuration file.", exc_info=e)
             self.report_state(RunnerState.ERROR, f"Failed to parse config: {str(e)}")
@@ -136,7 +143,6 @@ class FlipperDocker:
                 existing.remove(force=True)
                 self.logger.info("Existing container removed successfully")
             except docker.errors.NotFound:
-                # No existing container found, which is fine
                 pass
             except Exception as e:
                 self.logger.warning(f"Error handling existing container: {str(e)}")
@@ -150,7 +156,6 @@ class FlipperDocker:
                 self.logger.info(f"Image '{image_tag}' not found. Building new image...")
             except Exception as e:
                 self.logger.warning(f"Error checking for existing image: {str(e)}")
-                # Continue with build even if image check fails
 
             self.logger.info(
                 f"Building Docker image with tag '{image_tag}' from '{dockerfile_path}'..."
@@ -159,7 +164,7 @@ class FlipperDocker:
             image, build_logs = self.docker_client.images.build(
                 path=dockerfile_path,
                 tag=image_tag,
-                rm=True,  # Remove intermediate containers after a successful build
+                rm=True,
             )
 
             for chunk in build_logs:
@@ -184,8 +189,8 @@ class FlipperDocker:
             raise
 
     def find_device_by_id_and_get_path(
-            self, device_id: str, device_subsystem: str
-    ) -> str:
+        self, device_id: str, device_subsystem: str
+    ) -> Optional[str]:
         try:
             devices = self.pyudev_context.list_devices(subsystem=device_subsystem)
             device = next(
@@ -196,14 +201,35 @@ class FlipperDocker:
             error_msg = f"Device {device_id} not found!"
             self.logger.error(error_msg)
             self.report_state(RunnerState.ERROR, error_msg)
+            return None
         except Exception as e:
             self.logger.exception("Error finding device.", exc_info=e)
             self.report_state(RunnerState.ERROR, f"Device error: {str(e)}")
+            return None
+
+    def _find_blackmagic_if02_symlink(self) -> Optional[str]:
+        """
+        Find a Blackmagic serial interface whose /dev/serial/by-id symlink ends with '-if02'.
+        Returns the RESOLVED real device node (e.g., /dev/ttyACM0 or /dev/ttyUSB0).
+        """
+        pattern = "/dev/serial/by-id/usb-Flipper_Devices_Inc._Blackmagic_ESP32_blackmagic_*-if02"
+        candidates = sorted(glob.glob(pattern))
+        if not candidates:
+            self.logger.error(f"No Blackmagic '-if02' serial device found (pattern: {pattern})")
+            return None
+
+        chosen = candidates[0]
+        realpath = os.path.realpath(chosen)
+        self.logger.info(
+            f"Blackmagic candidates (if02): {candidates}; chosen: {chosen} -> {realpath}"
+        )
+        return realpath
 
     def find_devices(self) -> None:
         self.devices = []
         self.device_mappings = {}
 
+        # ST-Link (both tty and usb paths if present)
         tty_path = self.find_device_by_id_and_get_path(
             device_id=self.st_link_id, device_subsystem="tty"
         )
@@ -217,6 +243,15 @@ class FlipperDocker:
         if usb_path:
             self.devices.append(usb_path)
 
+        # Blackmagic (strictly the interface that ends with '-if02')
+        blackmagic_tty = self._find_blackmagic_if02_symlink()
+        if blackmagic_tty:
+            self.device_mappings[blackmagic_tty] = "/dev/tty_stlink"
+            self.devices.append(blackmagic_tty)
+        else:
+            # Don’t hard-fail here; container may still run for REPAIR stage using ST-Link only.
+            self.logger.warning("Proceeding without Blackmagic '-if02' device.")
+
     def create_docker_container(self) -> None:
         if not self.image:
             error_msg = "Docker image is not built. Cannot create container."
@@ -227,11 +262,11 @@ class FlipperDocker:
         hostname = socket.gethostname().split(".", 1)[0]
         volumes = {
             self.toolchain_directory: {"bind": "/opt/toolchain", "mode": "rw"},
-            "~/.cache/ccache": {"bind": "/root/.cache/ccache", "mode": "rw"},
+            str(self.ccache_directory): {"bind": "/root/.ccache", "mode": "rw"},
             f"/dev/flipper/{self.flipper_id}": {"bind": f"/dev/{self.flipper_id}", "mode": "rw", "propagation": "shared"},
         }
 
-        device_mappings = []
+        device_mappings: List[str] = []
         for host_device, container_device in self.device_mappings.items():
             device_mappings.append(f"{host_device}:{container_device}")
         for device in self.devices:
@@ -257,23 +292,25 @@ class FlipperDocker:
         self.logger.debug(f"ST_LINK_ID: {self.st_link_id}")
         environment = {
             "ORG_NAME": github_org_name,
-            "APP_ID": github_app_id,
-            "APP_PRIVATE_KEY": github_private_key,
             "DEBUG_OUTPUT": True,
-            # "RUNNER_TOKEN": github_access_token,
             "RUNNER_NAME": f"{hostname}-{self.flipper_id}",
             "LABELS": self.github_tag,
             "RUN_LEVEL": self.run_level.name,
             "RUNNER_SCOPE": "org",
             "EPHEMERAL": "1",
         }
+        # myoung34 runner: App auth and ACCESS/RUNNER token are mutually exclusive.
+        if github_app_id and github_private_key and "BEGIN" in github_private_key:
+            environment["APP_ID"] = github_app_id
+            environment["APP_PRIVATE_KEY"] = github_private_key
+        else:
+            environment["RUNNER_TOKEN"] = github_access_token
 
         self.logger.info(
             f"Creating Docker container '{self.flipper_id}' from image '{self.image.tags[0]}'..."
         )
 
         try:
-            # Report appropriate state based on run level
             if self.run_level == self.RunLevel.REPAIR:
                 self.report_state(RunnerState.REPAIRING)
             elif self.run_level == self.RunLevel.NORMAL:
@@ -287,7 +324,9 @@ class FlipperDocker:
                 volumes=volumes,
                 auto_remove=True,
                 detach=True,
-                device_cgroup_rules=['c 166:* rwm'],
+                device_cgroup_rules=[
+                    'c 166:* rwm',  # ttyACM*
+                ],
                 cap_add=["SYS_ADMIN"],
                 command=["/entrypoint.sh", self.flipper_id, self.st_link_id],
             )
@@ -356,7 +395,11 @@ class FlipperDocker:
             if container_exit_code not in [0, 4]:
                 error_msg = f"Container exited with code {container_exit_code}!"
                 self.logger.error(error_msg)
-                self.logger.error(self.container.logs().decode("utf-8"))
+                try:
+                    logs_str = self.container.logs().decode("utf-8", errors="replace")
+                    self.logger.error(logs_str)
+                except Exception:
+                    pass
                 self.report_state(RunnerState.ERROR, error_msg)
                 self.container = None
                 break

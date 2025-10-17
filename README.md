@@ -48,6 +48,7 @@ This will:
 3. Install udev rules for automatic device detection
 4. Configure systemd services for the specified Flipper and ST-Link devices
 5. Install service binaries to `/usr/local/bin/`
+6. Provision a Python virtual environment per runner under `/opt/flipper-runner/<FLIPPER_SERIAL>/venv` and install required packages (`pyudev`, `docker`, `pygelf`)
 
 The `--simulate` flag can be used to preview the changes without actually making them.
 
@@ -120,6 +121,10 @@ The system uses udev rules to automatically detect when Flipper devices are conn
 3. When a Flipper device is disconnected, the unbinder service removes these mappings
 
 This allows for hot-plugging Flipper devices without manual intervention.
+
+### Blackmagic Multi-TTY Adapters
+
+`flipper-docker-runner.py` understands probes that expose more than one TTY (e.g. Blackmagic ESP32). When multiples are detected for the same serial, the GDB channel (`interface 00`) is mounted inside the container as `/dev/tty_stlink`, while the console channel (`interface 02`) is mirrored as `/dev/tty_stlink_aux*` and kept available for logging. The entrypoint exports `ST_LINK_PRIMARY_TTY`, `ST_LINK_LOG_TTY`, and `ST_LINK_AUX_TTYS` so you can confirm the mapping with `docker logs`. All raw device nodes are still passed through, preserving compatibility with legacy ST-Link setups.
 
 ## Monitoring
 

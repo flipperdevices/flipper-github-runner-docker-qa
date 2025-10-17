@@ -6,6 +6,11 @@ Requires=docker.service
 [Service]
 TimeoutStartSec=0
 Restart=always
+# Clear any container stuck in "removal in progress" that still holds the name
+# (auto_remove can wedge on a busy /dev bind-mount when the device re-enumerates),
+# otherwise the next create hits 409 and systemd start-limits the unit. "-" ignores
+# the exit code when no such container exists.
+ExecStartPre=-/usr/bin/docker rm -f __FLIPPER_SERIAL__
 ExecStart=/usr/local/bin/flipper-docker-wrapper.sh __FLIPPER_SERIAL__ __STLINK_SERIAL__ __GITHUB_RUNNER_TAG__
 KillSignal=SIGINT
 
